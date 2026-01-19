@@ -1,4 +1,4 @@
-// src/lead/schemas/lead.schema.ts
+// src/lead/schemas/lead.schema.ts (Backend) - COMPLETE FIXED VERSION
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
@@ -25,10 +25,28 @@ export class Lead {
   })
   leadSource: string;
 
+  // ✅ COMPLETE STATUS ENUM: Includes ALL status values (existing + new)
   @Prop({
     required: true,
-    enum: ['New', 'Qualified', 'Quoted', 'Won', 'Lost'],
-    default: 'New',
+    enum: [
+      // New standardized statuses
+      'Seeded Lead',
+      'Meeting Fixed',
+      'Meeting Completed',
+      'CS Executed',
+      // Legacy statuses (for backward compatibility with existing data)
+      'New',
+      'Contacted',
+      'Visit Scheduled',
+      'Visit Completed',
+      'Qualified',
+      'Quoted',
+      'Won',
+      'Lost',
+      'Pending',
+      'Follow-Up'
+    ],
+    default: 'Seeded Lead',
   })
   status: string;
 
@@ -41,7 +59,6 @@ export class Lead {
   @Prop()
   notes?: string;
 
-  // NEW FIELD: Track if lead has been converted to a deal
   @Prop({ default: false })
   isConverted: boolean;
 

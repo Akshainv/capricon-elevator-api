@@ -1,4 +1,4 @@
-// src/lead/lead.service.ts (Backend) - FIXED VERSION
+// src/lead/lead.service.ts (Backend) - COMPLETE FIXED FILE
 import { Injectable, HttpException, HttpStatus, BadRequestException } from '@nestjs/common';
 import { CreateLeadDto } from './dto/create-lead.dtos';
 import { UpdateLeadDto } from './dto/update-lead.dtos';
@@ -14,7 +14,7 @@ export class LeadService {
     @InjectModel(Lead.name) private LeadModel: Model<LeadDocument>,
     @InjectModel(assignLead.name)
     private assignLeadModel: Model<assignLeadDocument>,
-  ) {}
+  ) { }
 
   async createLead(dto: CreateLeadDto) {
     const existingLead = await this.LeadModel.findOne({
@@ -61,9 +61,8 @@ export class LeadService {
     };
   }
 
-  // Get leads created by a specific user (excluding assigned and converted ones)
   async getLeadsCreatedBy(userId: string) {
-    const leads = await this.LeadModel.find({ 
+    const leads = await this.LeadModel.find({
       createdBy: userId,
       $and: [
         {
@@ -82,7 +81,7 @@ export class LeadService {
         }
       ]
     }).exec();
-    
+
     return {
       message: 'Leads created by user fetched successfully',
       count: leads.length,
@@ -90,23 +89,21 @@ export class LeadService {
     };
   }
 
-  // ✅ FIXED: Get leads assigned to a user (by admin)
-  // Show ALL leads assigned to this user regardless of status
   async getLeadsAssignedToButNotCreatedBy(userId: string) {
-    const leads = await this.LeadModel.find({ 
+    const leads = await this.LeadModel.find({
       assignedTo: userId,
-      createdBy: { $ne: userId }, // ✅ CRITICAL: Exclude leads created by this user
+      createdBy: { $ne: userId },
       $or: [
         { isConverted: { $exists: false } },
         { isConverted: false }
       ]
     }).exec();
-    
+
     console.log(`Backend: Found ${leads.length} leads assigned to user ${userId}`);
     leads.forEach(lead => {
       console.log(`  - Lead: ${lead.fullName}, assignedTo: ${lead.assignedTo}, createdBy: ${lead.createdBy}, status: ${lead.status}`);
     });
-    
+
     return {
       message: 'Leads assigned to user fetched successfully',
       count: leads.length,
@@ -114,10 +111,10 @@ export class LeadService {
     };
   }
 
-  // Get unassigned and unconverted leads for admin assignment
+  // ✅ FIXED: Changed 'New' to 'Seeded Lead' to match schema
   async getUnassignedAndUnconvertedLeads() {
     const leads = await this.LeadModel.find({
-      status: 'New',
+      status: 'Seeded Lead',  // ✅ FIXED: Was 'New', now 'Seeded Lead'
       $and: [
         {
           $or: [
@@ -134,7 +131,7 @@ export class LeadService {
         }
       ]
     }).exec();
-    
+
     return {
       message: 'Unassigned and unconverted leads fetched successfully',
       count: leads.length,
@@ -142,25 +139,63 @@ export class LeadService {
     };
   }
 
+  // ✅ Use $set to update ONLY provided fields
   async updateLead(id: string, dto: UpdateLeadDto) {
-    const updatedLead = await this.LeadModel.findByIdAndUpdate(id, dto, {
-      new: true,
-    }).exec();
+    console.log('==============================================');
+    console.log('Backend Service: Updating lead:', id);
+    console.log('Update data:', dto);
+    console.log('Fields being updated:', Object.keys(dto));
+    console.log('==============================================');
+
+    const updatedLead = await this.LeadModel.findByIdAndUpdate(
+      id,
+      { $set: dto },
+      {
+        new: true,
+        runValidators: true
+      }
+    ).exec();
 
     if (!updatedLead) {
       throw new HttpException('Lead not found', HttpStatus.NOT_FOUND);
     }
 
-    console.log(`Backend: Lead ${id} updated:`, {
-      fullName: updatedLead.fullName,
-      assignedTo: updatedLead.assignedTo,
-      createdBy: updatedLead.createdBy,
-      status: updatedLead.status,
-      isConverted: updatedLead.isConverted
-    });
+    console.log('==============================================');
+    console.log('Backend Service: Lead updated successfully');
+    console.log('Updated lead status:', updatedLead.status);
+    console.log('==============================================');
 
     return {
       message: 'Lead updated successfully',
+      data: updatedLead,
+    };
+  }
+
+  // ✅ DEDICATED STATUS UPDATE: Update ONLY the status field
+  async updateLeadStatus(id: string, status: string) {
+    console.log('==============================================');
+    console.log('Backend Service: Updating lead STATUS');
+    console.log('Lead ID:', id);
+    console.log('New status:', status);
+    console.log('==============================================');
+
+    const updatedLead = await this.LeadModel.findByIdAndUpdate(
+      id,
+      { $set: { status } },
+      { new: true, runValidators: true }
+    ).exec();
+
+    if (!updatedLead) {
+      throw new HttpException('Lead not found', HttpStatus.NOT_FOUND);
+    }
+
+    console.log('==============================================');
+    console.log('Backend Service: Status updated successfully');
+    console.log('New status in DB:', updatedLead.status);
+    console.log('==============================================');
+
+    return {
+      message: 'Lead status updated successfully',
       data: updatedLead,
     };
   }
@@ -176,7 +211,6 @@ export class LeadService {
     };
   }
 
-  // ✅ CRITICAL FIX: Ensure atomic updates with proper await and error handling
   async createAssign(dto: CreateAssignLeadDto) {
     console.log('==============================================');
     console.log('Backend: Starting lead assignment process');
@@ -184,7 +218,6 @@ export class LeadService {
     console.log('Assigned to:', dto.assignedSales);
     console.log('==============================================');
 
-    // Verify all leads exist
     const existingLeads = await this.LeadModel.find({
       _id: { $in: dto.leadIds },
     });
@@ -194,8 +227,7 @@ export class LeadService {
     }
 
     console.log(`Backend: Found ${existingLeads.length} leads to assign`);
-    
-    // Create assignment record first
+
     const assign = new this.assignLeadModel({
       leadIds: dto.leadIds,
       assignedSales: dto.assignedSales,
@@ -203,21 +235,19 @@ export class LeadService {
       notes: dto.notes || '',
     });
 
-    // Save assignment
     const savedAssignment = await assign.save();
     console.log('Backend: Assignment record created:', savedAssignment._id);
 
-    // ✅ CRITICAL FIX: Use updateMany with proper await to ensure all leads are updated
-    // This ensures MongoDB writes are completed before returning
+    // ✅ When assigning leads, set status to 'Meeting Fixed' (not 'Qualified')
     const updateResult = await this.LeadModel.updateMany(
       { _id: { $in: dto.leadIds } },
-      { 
-        $set: { 
+      {
+        $set: {
           assignedTo: dto.assignedSales,
-          status: 'Qualified' // Change status from 'New' to 'Qualified'
-        } 
+          status: 'Meeting Fixed'  // ✅ FIXED: Changed from 'Qualified' to valid status
+        }
       }
-    ).exec(); // ✅ Added .exec() for proper promise resolution
+    ).exec();
 
     console.log('==============================================');
     console.log('Backend: Update completed');
@@ -225,7 +255,6 @@ export class LeadService {
     console.log('Modified documents:', updateResult.modifiedCount);
     console.log('==============================================');
 
-    // ✅ ADDITIONAL FIX: Verify the updates by fetching the updated leads
     const updatedLeads = await this.LeadModel.find({
       _id: { $in: dto.leadIds }
     }).exec();
@@ -235,14 +264,13 @@ export class LeadService {
       console.log(`  - ${lead.fullName}: assignedTo=${lead.assignedTo}, status=${lead.status}`);
     });
 
-    // ✅ RETURN UPDATED LEADS in response for frontend verification
     return {
       _id: savedAssignment._id,
       leadIds: savedAssignment.leadIds,
       assignedSales: savedAssignment.assignedSales,
       leadCount: savedAssignment.leadCount,
       notes: savedAssignment.notes,
-      updatedLeads: updatedLeads, // Include updated leads for verification
+      updatedLeads: updatedLeads,
       updateResult: {
         matched: updateResult.matchedCount,
         modified: updateResult.modifiedCount

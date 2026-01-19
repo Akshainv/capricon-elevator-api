@@ -1,4 +1,4 @@
-// src/lead/lead.controller.ts (Backend)
+// src/lead/lead.controller.ts (Backend) - FIXED ROUTE ORDER
 import {
   Controller,
   Get,
@@ -7,6 +7,7 @@ import {
   Param,
   Delete,
   Put,
+  Patch,
   HttpStatus,
   HttpException,
 } from '@nestjs/common';
@@ -17,10 +18,9 @@ import { CreateAssignLeadDto } from '../lead/dto/create-assign-lead.dto';
 
 @Controller('lead')
 export class LeadController {
-  constructor(private readonly leadService: LeadService) {}
+  constructor(private readonly leadService: LeadService) { }
 
-  // ---------------------- LEAD CRUD ----------------------
-
+  // ====================== CREATE ======================
   @Post()
   async create(@Body() createLeadDto: CreateLeadDto) {
     try {
@@ -34,61 +34,7 @@ export class LeadController {
     }
   }
 
-  @Get()
-  async findAll() {
-    try {
-      const result = await this.leadService.getAllLeads();
-      return {
-        statusCode: HttpStatus.OK,
-        ...result
-      };
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  @Get('created-by/:userId')
-  async getLeadsCreatedBy(@Param('userId') userId: string) {
-    try {
-      const result = await this.leadService.getLeadsCreatedBy(userId);
-      return {
-        statusCode: HttpStatus.OK,
-        ...result
-      };
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  @Get('assigned-to/:userId')
-  async getLeadsAssignedToButNotCreatedBy(@Param('userId') userId: string) {
-    try {
-      const result = await this.leadService.getLeadsAssignedToButNotCreatedBy(userId);
-      return {
-        statusCode: HttpStatus.OK,
-        ...result
-      };
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  // NEW ENDPOINT: Get unassigned and unconverted leads
-  @Get('unassigned-unconverted')
-  async getUnassignedAndUnconvertedLeads() {
-    try {
-      const result = await this.leadService.getUnassignedAndUnconvertedLeads();
-      return {
-        statusCode: HttpStatus.OK,
-        ...result
-      };
-    } catch (error) {
-      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-  }
-
-  // ---------------------- ASSIGN LEAD ----------------------
-
+  // ====================== ASSIGNMENT ROUTES (BEFORE :id) ======================
   @Post('assign')
   async createAssign(@Body() createAssignLeadDto: CreateAssignLeadDto) {
     try {
@@ -131,8 +77,88 @@ export class LeadController {
     }
   }
 
-  // ---------------------- LEAD BY ID LAST ----------------------
+  // ====================== SPECIFIC ROUTES (BEFORE :id) ======================
+  
+  @Get('created-by/:userId')
+  async getLeadsCreatedBy(@Param('userId') userId: string) {
+    try {
+      const result = await this.leadService.getLeadsCreatedBy(userId);
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 
+  @Get('assigned-to/:userId')
+  async getLeadsAssignedToButNotCreatedBy(@Param('userId') userId: string) {
+    try {
+      const result = await this.leadService.getLeadsAssignedToButNotCreatedBy(userId);
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  @Get('unassigned-unconverted')
+  async getUnassignedAndUnconvertedLeads() {
+    try {
+      const result = await this.leadService.getUnassignedAndUnconvertedLeads();
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // ====================== GET ALL LEADS ======================
+  @Get()
+  async findAll() {
+    try {
+      const result = await this.leadService.getAllLeads();
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      throw new HttpException(error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  // ====================== CRITICAL: STATUS UPDATE (BEFORE :id) ======================
+  // ✅ THIS MUST COME BEFORE @Get(':id') AND @Put(':id')
+  @Patch(':id/status')
+  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
+    console.log('==============================================');
+    console.log('📥 PATCH /lead/:id/status endpoint hit');
+    console.log('Lead ID:', id);
+    console.log('New Status:', status);
+    console.log('==============================================');
+
+    try {
+      const result = await this.leadService.updateLeadStatus(id, status);
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      console.error('❌ Status update error:', error.message);
+      throw new HttpException(
+        error.message || 'Status update failed',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  // ====================== GENERIC :id ROUTES (MUST BE LAST) ======================
+  
   @Get(':id')
   async findOne(@Param('id') id: string) {
     try {
