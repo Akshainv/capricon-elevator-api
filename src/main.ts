@@ -18,7 +18,8 @@ async function bootstrap() {
       'http://localhost:4200',
       'http://localhost:3000',
       /^http:\/\/localhost:\d+$/,
-      'https://capricon-elevator.vercel.app'
+      'https://capricon-elevator.vercel.app',
+      'https://capricon-new.vercel.app'
     ],
     credentials: true,
   });
