@@ -45,36 +45,45 @@ export class CreateQuotationDto {
   companyName?: string;
 
   @IsOptional()
-  @IsEnum(['draft', 'sent', 'approved', 'rejected'])
+  @IsString()
   status?: string;
+
+  @IsString()
+  address: string;
+
+  // ⚠️ LEGACY FIELDS - Made optional for backward compatibility
+  // Frontend now uses new Page 4 fields instead (elevatorType, noOfStops, etc.)
+  @IsOptional()
+  @IsString()
+  elevationType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  numberOfFloors?: number;
 
   @IsOptional()
   @IsString()
-  address?: string;
+  doorConfiguration?: string;
 
-  @IsEnum(['home lift', 'commercial elevator', 'elevator with shaft', 'shaftless elevator', 'passenger', 'goods', 'hospital', 'service'])
-  elevationType: string;
-
+  @IsOptional()
   @IsNumber()
-  numberOfFloors: number;
+  numberOfElevators?: number;
 
-  @IsEnum(['1 door', '2 Doors', '3 Doors'])
-  doorConfiguration: string;
+  @IsOptional()
+  @IsString()
+  speed?: string;
 
-  @IsNumber()
-  numberOfElevators: number;
+  @IsOptional()
+  @IsString()
+  capacity?: string;
 
-  @IsEnum(['1.0 m/s', '1.5 m/s', '2.0 m/s', '2.5 m/s'])
-  speed: string;
+  @IsOptional()
+  @IsString()
+  driveType?: string;
 
-  @IsEnum(['8', '10', '13', '16'])
-  capacity: string;
-
-  @IsEnum(['variable frequency drive', 'gearless drive', 'geared drive'])
-  driveType: string;
-
-  @IsEnum(['microprocessor based', 'plc based', 'iot based'])
-  controlSystem: string;
+  @IsOptional()
+  @IsString()
+  controlSystem?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -96,7 +105,7 @@ export class CreateQuotationDto {
   @IsString()
   internalNotes?: string;
 
-  @IsNumber()
+  @IsOptional()
   baseCost: number;
 
   @IsOptional()
@@ -115,7 +124,7 @@ export class CreateQuotationDto {
   @IsNumber()
   sgst?: number;
 
-  @IsNumber()
+  @IsOptional()
   totalCost: number;
 
   @IsOptional()
@@ -131,4 +140,104 @@ export class CreateQuotationDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  productName?: string;
+
+  @IsOptional()
+  @IsArray()
+  pricingItems?: any[];
+
+  // ✅ NEW: Bank details object
+  @IsOptional()
+  bankDetails?: {
+    accountNo: string;
+    ifsc: string;
+    bank: string;
+    gstin: string;
+    accountName: string;
+    accountType: string;
+    branch: string;
+    pan: string;
+  };
+
+  // ✅ NEW: Payment terms array
+  @IsOptional()
+  @IsArray()
+  paymentTerms?: {
+    slNo: number;
+    description: string;
+    rate: string;
+  }[];
+
+  // ✅ NEW: GST rate
+  @IsOptional()
+  @IsNumber()
+  gstRate?: number;
+
+  // ✅ NEW: PDF Page 4 Technical Specs
+  @IsOptional()
+  @IsString()
+  model?: string;
+
+  @IsOptional()
+  @IsNumber()
+  quantity?: number;
+
+  @IsOptional()
+  @IsNumber()
+  noOfStops?: number;
+
+  @IsOptional()
+  @IsString()
+  elevatorType?: string;
+
+  @IsOptional()
+  @IsString()
+  ratedLoad?: string;
+
+  @IsOptional()
+  @IsString()
+  maximumSpeed?: string;
+
+  @IsOptional()
+  @IsString()
+  travelHeight?: string;
+
+  @IsOptional()
+  @IsString()
+  driveSystem?: string;
+
+  @IsOptional()
+  @IsString()
+  cabinWalls?: string;
+
+  @IsOptional()
+  @IsString()
+  cabinDoors?: string;
+
+  @IsOptional()
+  @IsString()
+  doorType?: string;
+
+  @IsOptional()
+  @IsString()
+  doorOpening?: string;
+
+  @IsOptional()
+  @IsString()
+  copLopScreen?: string;
+
+  @IsOptional()
+  @IsString()
+  cabinCeiling?: string;
+
+  @IsOptional()
+  @IsString()
+  cabinFloor?: string;
+
+  @IsOptional()
+  @IsNumber()
+  handrails?: number;
 }

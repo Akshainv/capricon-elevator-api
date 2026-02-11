@@ -16,12 +16,14 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:4200',
+      'http://localhost:3000',
+      /^http:\/\/localhost:\d+$/,
       'https://capricon-elevator.vercel.app'
     ],
     credentials: true,
   });
 
-  // 🔥 Serve static files from uploads folder
+  // Serve static files from uploads folder
   app.useStaticAssets(join(__dirname, '..', 'uploads'), {
     prefix: '/uploads/',
   });

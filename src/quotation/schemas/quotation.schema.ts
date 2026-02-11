@@ -42,12 +42,12 @@ export class Quotation {
   companyName: string;
 
   @Prop({
-    default: 'draft',
+    default: 'sent',
     enum: ['draft', 'sent', 'approved', 'rejected'],
   })
   status: string;
 
-  @Prop()
+  @Prop({ required: true })
   address: string;
 
   @Prop({
@@ -65,10 +65,10 @@ export class Quotation {
   @Prop({ required: true })
   numberOfElevators: number;
 
-  @Prop({ required: true, enum: ['1.0 m/s', '1.5 m/s', '2.0 m/s', '2.5 m/s'] })
+  @Prop({ required: true })
   speed: string;
 
-  @Prop({ required: true, enum: ['8', '10', '13', '16'] })
+  @Prop({ required: true })
   capacity: string;
 
   @Prop({
@@ -77,10 +77,7 @@ export class Quotation {
   })
   driveType: string;
 
-  @Prop({
-    required: true,
-    enum: ['microprocessor based', 'plc based', 'iot based'],
-  })
+  @Prop({ required: false })
   controlSystem: string;
 
   @Prop({ default: false })
@@ -134,6 +131,87 @@ export class Quotation {
 
   @Prop()
   notes: string;
+
+  // ✅ NEW: Fields for PDF generation persistence
+  @Prop()
+  productName: string;
+
+  @Prop({ type: Array, default: [] })
+  pricingItems: any[];
+
+  // ✅ NEW: Bank details for quotation
+  @Prop({ type: Object })
+  bankDetails: {
+    accountNo: string;
+    ifsc: string;
+    bank: string;
+    gstin: string;
+    accountName: string;
+    accountType: string;
+    branch: string;
+    pan: string;
+  };
+
+  // ✅ NEW: Payment terms array
+  @Prop({ type: Array, default: [] })
+  paymentTerms: {
+    slNo: number;
+    description: string;
+    rate: string;
+  }[];
+
+  // ✅ NEW: GST rate
+  @Prop({ default: 18 })
+  gstRate: number;
+
+  // ✅ NEW: PDF Page 4 Technical Specs
+  @Prop()
+  model: string;
+
+  @Prop({ default: 1 })
+  quantity: number;
+
+  @Prop({ default: 2 })
+  noOfStops: number;
+
+  @Prop()
+  elevatorType: string;
+
+  @Prop()
+  ratedLoad: string;
+
+  @Prop()
+  maximumSpeed: string;
+
+  @Prop()
+  travelHeight: string;
+
+  @Prop()
+  driveSystem: string;
+
+  @Prop()
+  cabinWalls: string;
+
+  @Prop()
+  cabinDoors: string;
+
+  @Prop()
+  doorType: string;
+
+  @Prop()
+  doorOpening: string;
+
+  @Prop()
+  copLopScreen: string;
+
+  @Prop()
+  cabinCeiling: string;
+
+  @Prop()
+  cabinFloor: string;
+
+  @Prop({ default: 1 })
+  handrails: number;
 }
 
 export const QuotationSchema = SchemaFactory.createForClass(Quotation);

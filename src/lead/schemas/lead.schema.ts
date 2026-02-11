@@ -19,6 +19,12 @@ export class Lead {
   companyName?: string;
 
   @Prop({
+    enum: ['low', 'medium', 'high'],
+    default: 'medium',
+  })
+  priority: string;
+
+  @Prop({
     required: true,
     enum: ['Walk-in', 'Website', 'Reference', 'Phone Call', 'Email', 'Social Media', 'Other'],
     default: 'Other',
@@ -31,6 +37,7 @@ export class Lead {
     enum: [
       // New standardized statuses
       'Seeded Lead',
+      'CS Executive Assigned',
       'Meeting Fixed',
       'Meeting Completed',
       'CS Executed',
@@ -44,7 +51,9 @@ export class Lead {
       'Won',
       'Lost',
       'Pending',
-      'Follow-Up'
+      'Follow-Up',
+      'Junk',
+      'Junk Lead'
     ],
     default: 'Seeded Lead',
   })
@@ -58,6 +67,9 @@ export class Lead {
 
   @Prop()
   notes?: string;
+
+  @Prop()
+  address?: string;
 
   @Prop({ default: false })
   isConverted: boolean;

@@ -6,7 +6,11 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Quotation, QuotationDocument } from './schemas/quotation.schema';
 import { Model } from 'mongoose';
 import * as nodemailer from 'nodemailer';
-import * as puppeteer from 'puppeteer';
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as dns from 'dns';
+import * as net from 'net';
 
 @Injectable()
 export class QuotationService {
@@ -30,17 +34,17 @@ export class QuotationService {
 
     const transportOptions: any = useGmail
       ? {
-          service: 'gmail',
-          secure: true,
-          port: 465,
-          auth: { user, pass },
-        }
+        service: 'gmail',
+        secure: true,
+        port: 465,
+        auth: { user, pass },
+      }
       : {
-          host: host || 'smtp.gmail.com',
-          port: parseInt(portEnv || '587', 10),
-          secure: portEnv === '465',
-          auth: { user, pass },
-        };
+        host: host || 'smtp.gmail.com',
+        port: parseInt(portEnv || '587', 10),
+        secure: portEnv === '465',
+        auth: { user, pass },
+      };
 
     this.transporter = nodemailer.createTransport(transportOptions);
 
@@ -222,28 +226,210 @@ export class QuotationService {
     return { message: 'Quotation successfully deleted' };
   }
 
-  // MODIFIED: Generate PDF from quotation data and send via email
+  // ==========================================
+  // EMAIL VERIFICATION METHODS
+  // ==========================================
+
+  // Validate email format
+  private isValidEmailFormat(email: string): boolean {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  }
+
+  // Check if domain has valid MX records (can receive emails)
+  private async verifyDomainMX(domain: string): Promise<{ valid: boolean; mxRecords?: dns.MxRecord[]; error?: string }> {
+    return new Promise((resolve) => {
+      dns.resolveMx(domain, (err, addresses) => {
+        if (err) {
+          console.log(`❌ MX lookup failed for ${domain}:`, err.code);
+          if (err.code === 'ENOTFOUND' || err.code === 'ENODATA') {
+            resolve({ valid: false, error: `Domain "${domain}" does not exist or cannot receive emails` });
+          } else {
+            // Leniency: Allow send if the DNS server itself is unreachable (like ECONNREFUSED)
+            console.log(`⚠️ DNS system error (${err.code}) - proceeding with send anyway`);
+            resolve({ valid: true, error: `Unable to verify domain: ${err.message}` });
+          }
+        } else if (!addresses || addresses.length === 0) {
+          // Leniency: Proceed even if no MX records, as mail servers might fallback to A records
+          console.log(`⚠️ No MX records for ${domain} - proceeding with send anyway`);
+          resolve({ valid: true });
+        } else {
+          console.log(`✅ MX records found for ${domain}:`, addresses.map(a => a.exchange).join(', '));
+          resolve({ valid: true, mxRecords: addresses });
+        }
+      });
+    });
+  }
+
+  // SMTP verification to check if mailbox exists
+  private async verifyMailboxExists(email: string, mxHost: string): Promise<{ exists: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const timeout = 10000; // 10 second timeout
+      const socket = new net.Socket();
+      let step = 0;
+      let response = '';
+
+      const cleanup = () => {
+        socket.removeAllListeners();
+        socket.destroy();
+      };
+
+      socket.setTimeout(timeout);
+
+      socket.on('timeout', () => {
+        console.log('⏱️ SMTP verification timeout');
+        cleanup();
+        // On timeout, assume email might be valid (don't block sending)
+        resolve({ exists: true, error: 'Verification timeout - proceeding with send' });
+      });
+
+      socket.on('error', (err: any) => {
+        console.log('❌ SMTP socket error:', err.message);
+        cleanup();
+        // On error, assume email might be valid (don't block sending)
+        resolve({ exists: true, error: 'Verification error - proceeding with send' });
+      });
+
+      socket.on('data', (data: Buffer) => {
+        response += data.toString();
+        const lines = response.split('\r\n');
+
+        for (const line of lines) {
+          if (line.length < 3) continue;
+          const code = parseInt(line.substring(0, 3), 10);
+
+          if (step === 0 && code === 220) {
+            // Server ready, send HELO
+            step = 1;
+            socket.write('HELO verify.local\r\n');
+          } else if (step === 1 && code === 250) {
+            // HELO accepted, send MAIL FROM
+            step = 2;
+            socket.write('MAIL FROM:<verify@verify.local>\r\n');
+          } else if (step === 2 && code === 250) {
+            // MAIL FROM accepted, send RCPT TO (this is where we verify)
+            step = 3;
+            socket.write(`RCPT TO:<${email}>\r\n`);
+          } else if (step === 3) {
+            // Check RCPT TO response
+            socket.write('QUIT\r\n');
+            cleanup();
+
+            if (code === 250 || code === 251) {
+              console.log(`✅ Mailbox verified: ${email} exists`);
+              resolve({ exists: true });
+            } else if (code === 550 || code === 551 || code === 552 || code === 553 || code === 554) {
+              console.log(`❌ Mailbox rejected (${code}): ${email} does not exist`);
+              resolve({ exists: false, error: `Email address "${email}" does not exist on the mail server` });
+            } else if (code === 450 || code === 451 || code === 452) {
+              // Temporary failure - assume valid
+              console.log(`⚠️ Temporary response (${code}) - assuming valid`);
+              resolve({ exists: true });
+            } else {
+              // Unknown response - assume valid to not block
+              console.log(`⚠️ Unknown response (${code}) - assuming valid`);
+              resolve({ exists: true });
+            }
+            return;
+          }
+        }
+        response = lines[lines.length - 1]; // Keep incomplete line
+      });
+
+      socket.on('close', () => {
+        if (step < 3) {
+          // Connection closed before verification complete
+          resolve({ exists: true, error: 'Connection closed early - proceeding with send' });
+        }
+      });
+
+      // Connect to MX server on port 25
+      console.log(`🔌 Connecting to ${mxHost}:25 to verify ${email}...`);
+      socket.connect(25, mxHost);
+    });
+  }
+
+  // Main email verification method
+  async verifyEmail(email: string): Promise<{ valid: boolean; error?: string }> {
+    // Step 1: Check email format
+    if (!this.isValidEmailFormat(email)) {
+      return { valid: false, error: 'Invalid email format' };
+    }
+
+    // Step 2: Extract domain
+    const domain = email.split('@')[1];
+    if (!domain) {
+      return { valid: false, error: 'Invalid email format - no domain found' };
+    }
+
+    // Step 3: Check MX records
+    const mxResult = await this.verifyDomainMX(domain);
+    if (!mxResult.valid) {
+      return { valid: false, error: mxResult.error };
+    }
+
+    // Step 4: SMTP verification (optional - may fail due to firewalls/greylisting)
+    try {
+      const mxHost = mxResult.mxRecords![0].exchange;
+      const mailboxResult = await this.verifyMailboxExists(email, mxHost);
+
+      if (!mailboxResult.exists) {
+        return { valid: false, error: mailboxResult.error };
+      }
+    } catch (smtpError: any) {
+      // If SMTP verification fails, fall back to just MX check (which passed)
+      console.log('⚠️ SMTP verification failed, proceeding with MX-verified domain');
+    }
+
+    return { valid: true };
+  }
+
+  // MODIFIED: Generate PDF from quotation data and send via email with verification
   async sendQuotationWithPDF(id: string, email: string, quotationData: any) {
     const quotation = await this.findOne(id);
-    
+
     try {
       console.log('📧 Starting email send process for quotation:', quotation.quoteNumber);
-      
-      // Generate PDF using Puppeteer
+
+      // ==========================================
+      // EMAIL VERIFICATION (NON-BLOCKING)
+      // ==========================================
+      try {
+        console.log('🔍 Verifying email address:', email);
+        const verificationResult = await this.verifyEmail(email);
+        if (!verificationResult.valid) {
+          console.warn('⚠️ Email verification warning:', verificationResult.error);
+          // We proceed anyway to handle local DNS/network issues gracefully
+        } else {
+          console.log('✅ Email verification passed for:', email);
+        }
+      } catch (verifyError: any) {
+        console.warn('⚠️ Email verification process failed, skipping check:', verifyError.message);
+      }
+
+      // Generate 13-page PDF using pdf-lib and template
       const pdfBuffer = await this.generateQuotationPDF(quotationData);
-      console.log('✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
-      
+      console.log('✅ 13-page PDF generated successfully, size:', pdfBuffer.length, 'bytes');
+
       // Send email with PDF attachment
       const fromAddress = process.env.EMAIL_USER || process.env.SMTP_USER || 'noreply@capricornelevators.com';
-      
+
       if (!fromAddress) {
         console.error('❌ No email sender configured in environment variables');
         throw new HttpException('Email configuration missing - EMAIL_USER not set', HttpStatus.INTERNAL_SERVER_ERROR);
       }
 
+      // Use provided email or fallback to database fields
+      const q = quotation as any;
+      const recipientEmail = email || q.customerEmail || (q.customer && q.customer.email);
+
+      if (!recipientEmail) {
+        throw new HttpException('Recipient email is missing and not found in database', HttpStatus.BAD_REQUEST);
+      }
+
       const mailOptions = {
         from: `Capricorn Elevators <${fromAddress}>`,
-        to: email,
+        to: recipientEmail,
         subject: `Quotation ${quotation.quoteNumber} from Capricorn Elevators`,
         html: this.generateEmailBody(quotationData),
         attachments: [
@@ -255,7 +441,7 @@ export class QuotationService {
         ]
       };
 
-      console.log('📤 Sending email to:', email);
+      console.log('📤 Sending email to:', recipientEmail);
       const info = await this.transporter.sendMail(mailOptions);
       console.log('✅ Email sent successfully! Message ID:', info?.messageId);
 
@@ -263,20 +449,26 @@ export class QuotationService {
       await this.updateStatus(id, 'sent');
       console.log('✅ Quotation status updated to "sent"');
 
-      return { 
-        message: 'Quotation sent successfully with PDF attachment', 
+      return {
+        message: 'Quotation sent successfully with PDF attachment',
         quotation,
-        messageId: info?.messageId 
+        messageId: info?.messageId
       };
     } catch (error: any) {
       console.error('❌ Email send error:', error);
+
+      // If it's already an HttpException, re-throw it
+      if (error instanceof HttpException) {
+        throw error;
+      }
+
       console.error('Error details:', {
         message: error?.message,
         code: error?.code,
         command: error?.command,
         response: error?.response
       });
-      
+
       throw new HttpException(
         'Failed to send email: ' + (error?.message || 'Unknown error. Please check SMTP configuration.'),
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -284,344 +476,233 @@ export class QuotationService {
     }
   }
 
-  // MODIFIED: Generate PDF from quotation data using Puppeteer with better error handling
-  private async generateQuotationPDF(quotationData: any): Promise<Buffer> {
-    let browser: puppeteer.Browser | null = null;
-    
+  // GENERATE 13-PAGE PDF using template and pdf-lib
+  private async generateQuotationPDF(data: any): Promise<Buffer> {
     try {
-      console.log('🚀 Launching Puppeteer browser...');
-      
-      browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox', 
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu'
-        ]
-      });
+      console.log('📄 Generating 13-page PDF using template...');
+      const templatePath = path.join(process.cwd(), 'src', 'assets', 'templates', 'capricon.pdf');
 
-      const page = await browser.newPage();
-      console.log('📄 Browser page created');
-      
-      // Generate HTML for the quotation
-      const html = this.generateQuotationHTML(quotationData);
-      console.log('📝 HTML content generated, length:', html.length);
-      
-      await page.setContent(html, { 
-        waitUntil: 'networkidle0',
-        timeout: 30000 
-      });
-      console.log('✅ HTML content loaded in browser');
-      
-      // Generate PDF with proper page settings
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: {
-          top: '20px',
-          right: '20px',
-          bottom: '20px',
-          left: '20px'
-        },
-        preferCSSPageSize: false
-      });
+      if (!fs.existsSync(templatePath)) {
+        throw new Error(`PDF template not found at ${templatePath}`);
+      }
 
-      console.log('✅ PDF generated successfully');
-      return Buffer.from(pdfBuffer);
-      
+      const existingPdfBytes = fs.readFileSync(templatePath);
+      const pdfDoc = await PDFDocument.load(existingPdfBytes);
+      const pages = pdfDoc.getPages();
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const { height } = pages[0].getSize();
+
+      // --- PAGE 1: COVER PAGE (TEXT INJECTION) ---
+      if (pages.length >= 1) {
+        const page1 = pages[0];
+        await this.drawPage1Details(page1, data, font, boldFont, height);
+      }
+
+      // Note: Page 4 and Page 9 are currently dynamic in frontend via images.
+      // For backend, we will draw the text details manually since we don't have the canvas images.
+
+      // --- PAGE 4: TECHNICAL SPECIFICATIONS ---
+      if (pages.length >= 4) {
+        const page4 = pages[3];
+        await this.drawPage4Details(page4, data, font, boldFont, height);
+      }
+
+      // --- PAGE 9: PRICING ---
+      if (pages.length >= 9) {
+        const page9 = pages[8];
+        await this.drawPage9Manually(page9, data, font, boldFont, height);
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      return Buffer.from(pdfBytes);
     } catch (error: any) {
       console.error('❌ PDF generation error:', error);
       throw new HttpException(
         'Failed to generate PDF: ' + error.message,
         HttpStatus.INTERNAL_SERVER_ERROR
       );
-    } finally {
-      if (browser !== null) {
-        await browser.close();
-        console.log('🔒 Browser closed');
-      }
     }
   }
 
-  // ENHANCED: Generate complete HTML for quotation matching preview page design
-  private generateQuotationHTML(data: any): string {
-    const itemsHtml = (data.items || []).map((item: any) => `
-      <tr>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
-          <strong style="display: block; color: #111827; font-size: 14px;">${item.product?.name || ''}</strong>
-          <span style="display: block; color: #6b7280; font-size: 12px; margin-top: 2px;">${item.product?.category || ''}</span>
-        </td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; color: #374151;">${item.quantity}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #374151;">₹${item.price.toLocaleString('en-IN')}</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; color: #374151;">${item.discount}%</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center; color: #374151;">${item.tax}%</td>
-        <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right; color: #111827; font-weight: 600;">₹${item.total.toLocaleString('en-IN')}</td>
-      </tr>
-    `).join('');
+  private async drawPage4Details(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
+    const textColor = rgb(0, 0, 0);
+    const fontSize = 10;
+    const startX = 260;
+    const startY = height - 235;
+    const rowHeight = 20.8;
 
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <title>Quotation ${data.quoteNumber}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { 
-            font-family: 'Arial', 'Helvetica', sans-serif; 
-            line-height: 1.6; 
-            color: #1f2937; 
-            background: #ffffff;
-            padding: 40px;
-          }
-          .quotation-document { 
-            max-width: 800px; 
-            margin: 0 auto; 
-            background: white; 
-            padding: 40px;
-          }
-          .doc-header { 
-            display: flex; 
-            justify-content: space-between; 
-            margin-bottom: 40px; 
-            padding-bottom: 20px; 
-            border-bottom: 3px solid #d4b347; 
-          }
-          .company-name { 
-            font-size: 28px; 
-            font-weight: 700; 
-            color: #d4b347; 
-            margin-bottom: 8px; 
-          }
-          .company-detail { 
-            font-size: 12px; 
-            color: #6b7280; 
-            margin: 3px 0; 
-          }
-          .quote-header { 
-            font-size: 24px; 
-            font-weight: 700; 
-            color: #111827; 
-            margin-bottom: 12px; 
-          }
-          .quote-detail { 
-            font-size: 13px; 
-            color: #374151; 
-            margin: 4px 0; 
-          }
-          .section-heading { 
-            font-size: 14px; 
-            font-weight: 600; 
-            color: #111827; 
-            margin-bottom: 12px; 
-            text-transform: uppercase; 
-            letter-spacing: 0.5px; 
-          }
-          .bill-to-section { 
-            margin-bottom: 30px; 
-            padding: 20px; 
-            background: #f9fafb; 
-            border-left: 4px solid #d4b347; 
-          }
-          .customer-name { 
-            font-size: 16px; 
-            font-weight: 600; 
-            color: #111827; 
-            margin: 8px 0; 
-          }
-          .customer-detail { 
-            font-size: 13px; 
-            color: #4b5563; 
-            margin: 4px 0; 
-          }
-          .items-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            margin: 30px 0; 
-          }
-          .items-table thead { 
-            background: #f3f4f6; 
-          }
-          .items-table th { 
-            padding: 12px; 
-            text-align: left; 
-            font-size: 12px; 
-            font-weight: 600; 
-            color: #374151; 
-            text-transform: uppercase; 
-            letter-spacing: 0.5px; 
-            border-bottom: 2px solid #e5e7eb; 
-          }
-          .items-table th.col-qty, 
-          .items-table th.col-discount, 
-          .items-table th.col-tax { 
-            text-align: center; 
-          }
-          .items-table th.col-rate, 
-          .items-table th.col-amount { 
-            text-align: right; 
-          }
-          .totals-section { 
-            display: flex; 
-            justify-content: flex-end; 
-            margin: 30px 0; 
-          }
-          .totals-table { 
-            width: 350px; 
-          }
-          .total-row { 
-            display: flex; 
-            justify-content: space-between; 
-            padding: 10px 0; 
-            font-size: 14px; 
-          }
-          .total-row.discount .total-value { 
-            color: #dc2626; 
-          }
-          .total-row.tax .total-value { 
-            color: #059669; 
-          }
-          .total-divider { 
-            border-top: 1px solid #e5e7eb; 
-            margin: 10px 0; 
-          }
-          .total-row.grand-total { 
-            font-size: 18px; 
-            font-weight: 700; 
-            color: #111827; 
-            padding-top: 15px; 
-            border-top: 2px solid #d4b347; 
-          }
-          .terms-section, .notes-section { 
-            margin: 30px 0; 
-            padding: 20px; 
-            background: #f9fafb; 
-            border-radius: 8px; 
-          }
-          .terms-heading, .notes-heading { 
-            font-size: 14px; 
-            font-weight: 600; 
-            color: #111827; 
-            margin-bottom: 12px; 
-          }
-          .terms-content, .notes-content { 
-            font-size: 13px; 
-            color: #4b5563; 
-            white-space: pre-wrap; 
-            line-height: 1.8; 
-          }
-          .doc-footer { 
-            margin-top: 50px; 
-            padding-top: 30px; 
-            border-top: 2px solid #e5e7eb; 
-            text-align: center; 
-          }
-          .footer-text { 
-            font-size: 14px; 
-            color: #6b7280; 
-            margin-bottom: 20px; 
-          }
-          .footer-signature { 
-            font-size: 13px; 
-            color: #374151; 
-          }
-        </style>
-      </head>
-      <body>
-        <div class="quotation-document">
-          <div class="doc-header">
-            <div class="company-info">
-              <h2 class="company-name">Capricorn Elevators</h2>
-              <p class="company-detail">11th floor, Jomer Symphony, Unit 03, Ponnurunni East, Vyttila</p>
-              <p class="company-detail">Ernakulam, Kerala 682019</p>
-              <p class="company-detail">Phone: 075930 00222</p>
-              <p class="company-detail">Website: capricornelevators.com</p>
-              <p class="company-detail">GST: GST123456789</p>
-            </div>
-            
-            <div class="quote-info">
-              <h3 class="quote-header">QUOTATION</h3>
-              <p class="quote-detail"><strong>Quote #:</strong> ${data.quoteNumber}</p>
-              <p class="quote-detail"><strong>Date:</strong> ${new Date(data.quoteDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-              <p class="quote-detail"><strong>Valid Until:</strong> ${new Date(data.validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-            </div>
-          </div>
+    const specs = [
+      data.model || '',
+      data.quantity || '1',
+      data.noOfStops || '2',
+      data.elevatorType || '',
+      data.ratedLoad || '',
+      data.maximumSpeed || '',
+      data.travelHeight || '',
+      data.driveSystem || '',
+      data.controlSystem || '',
+      data.cabinWalls || '',
+      data.cabinDoors || '',
+      data.doorType || '',
+      data.doorOpening || '',
+      data.copLopScreen || '',
+      data.cabinCeiling || '',
+      data.cabinFloor || '',
+      data.handrails || '1'
+    ];
 
-          <div class="bill-to-section">
-            <h4 class="section-heading">Bill To:</h4>
-            <p class="customer-name">${data.customer?.name || ''}</p>
-            ${data.customer?.company ? `<p class="customer-detail">${data.customer.company}</p>` : ''}
-            <p class="customer-detail">${data.customer?.email || ''}</p>
-            <p class="customer-detail">${data.customer?.phone || ''}</p>
-            ${data.customer?.address ? `<p class="customer-detail">${data.customer.address}</p>` : ''}
-          </div>
+    specs.forEach((spec, index) => {
+      const y = startY - (index * rowHeight);
+      const text = String(spec);
 
-          <table class="items-table">
-            <thead>
-              <tr>
-                <th class="col-description">Description</th>
-                <th class="col-qty">Qty</th>
-                <th class="col-rate">Rate</th>
-                <th class="col-discount">Discount</th>
-                <th class="col-tax">Tax</th>
-                <th class="col-amount">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${itemsHtml}
-            </tbody>
-          </table>
+      // Basic text wrapping if too long
+      if (font.widthOfTextAtSize(text, fontSize) > 280) {
+        const words = text.split(' ');
+        let line1 = '';
+        let line2 = '';
+        for (const word of words) {
+          if (font.widthOfTextAtSize(line1 + word, fontSize) < 280) {
+            line1 += word + ' ';
+          } else {
+            line2 += word + ' ';
+          }
+        }
+        page.drawText(line1.trim(), { x: startX, y: y + 5, size: 9, font: font, color: textColor });
+        if (line2) {
+          page.drawText(line2.trim(), { x: startX, y: y - 5, size: 9, font: font, color: textColor });
+        }
+      } else {
+        page.drawText(text, { x: startX, y: y, size: fontSize, font: font, color: textColor });
+      }
+    });
+  }
 
-          <div class="totals-section">
-            <div class="totals-table">
-              <div class="total-row">
-                <span class="total-label">Subtotal:</span>
-                <span class="total-value">₹${(data.subtotal || 0).toLocaleString('en-IN')}</span>
-              </div>
-              ${data.totalDiscount > 0 ? `
-              <div class="total-row discount">
-                <span class="total-label">Total Discount:</span>
-                <span class="total-value">- ₹${data.totalDiscount.toLocaleString('en-IN')}</span>
-              </div>
-              ` : ''}
-              <div class="total-row tax">
-                <span class="total-label">Total Tax:</span>
-                <span class="total-value">+ ₹${(data.totalTax || 0).toLocaleString('en-IN')}</span>
-              </div>
-              <div class="total-divider"></div>
-              <div class="total-row grand-total">
-                <span class="total-label">Grand Total:</span>
-                <span class="total-value">₹${(data.grandTotal || 0).toLocaleString('en-IN')}</span>
-              </div>
-            </div>
-          </div>
+  private async drawPage1Details(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
+    const customer = data.customer || {};
+    const textColor = rgb(0.1, 0.1, 0.1);
+    const footerY = 140;
+    const leftX = 75;
+    const rightX = 360;
+    const lineSpacing = 15;
+    const labelSize = 8;
+    let currentLeftY = footerY;
+    let currentRightY = footerY;
 
-          ${data.termsAndConditions ? `
-          <div class="terms-section">
-            <h4 class="terms-heading">Terms & Conditions:</h4>
-            <div class="terms-content">${data.termsAndConditions}</div>
-          </div>
-          ` : ''}
+    // PREPARED FOR
+    page.drawText('PREPARED FOR', { x: leftX, y: currentLeftY + 15, size: labelSize, font: boldFont, color: textColor });
+    page.drawText(String(customer.name || '').toUpperCase(), { x: leftX, y: currentLeftY, size: 11, font: boldFont, color: textColor });
+    currentLeftY -= lineSpacing + 2;
 
-          ${data.notes ? `
-          <div class="notes-section">
-            <h4 class="notes-heading">Additional Notes:</h4>
-            <div class="notes-content">${data.notes}</div>
-          </div>
-          ` : ''}
+    if (customer.company) {
+      page.drawText(customer.company, { x: leftX, y: currentLeftY, size: 10, font: font, color: textColor });
+      currentLeftY -= lineSpacing;
+    }
 
-          <div class="doc-footer">
-            <p class="footer-text">Thank you for your business!</p>
-            <p class="footer-signature">
-              <strong>Authorized Signature</strong><br>
-              Capricorn Elevators
-            </p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    page.drawText(`Email: ${customer.email || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+    currentLeftY -= lineSpacing;
+
+    page.drawText(`Phone: ${customer.phone || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+    currentLeftY -= lineSpacing + 5;
+
+    // SITE ADDRESS
+    const address = customer.address || data.customerAddress || data.address || '';
+    if (address) {
+      page.drawText('SITE ADDRESS:', { x: leftX, y: currentLeftY, size: labelSize, font: boldFont, color: textColor });
+      currentLeftY -= lineSpacing - 2;
+
+      const maxWidth = 250;
+      const words = String(address).split(' ');
+      let line = '';
+
+      for (const word of words) {
+        const testLine = line + word + ' ';
+        const width = font.widthOfTextAtSize(testLine, 9);
+        if (width > maxWidth && line !== '') {
+          page.drawText(line, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+          line = word + ' ';
+          currentLeftY -= 12;
+        } else {
+          line = testLine;
+        }
+      }
+      if (line.trim()) {
+        page.drawText(line, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+      }
+    }
+
+    // QUOTATION DETAILS
+    page.drawText('QUOTATION DETAILS', { x: rightX, y: currentRightY + 15, size: labelSize, font: boldFont, color: textColor });
+
+    page.drawText('REFERENCE NO:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
+    page.drawText(data.quoteNumber || 'Draft', { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
+    currentRightY -= lineSpacing;
+
+    page.drawText('DATE:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
+    page.drawText(this.formatDate(data.quoteDate), { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
+    currentRightY -= lineSpacing;
+
+    page.drawText('VALID UNTIL:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
+    page.drawText(this.formatDate(data.validUntil), { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
+  }
+
+  private async drawPage9Manually(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
+    const pricingItems = data.pricingItems || [];
+    const startY = height - 310;
+    const rowSpacing = 18.5;
+
+    pricingItems.forEach((item: any, index: number) => {
+      const y = startY - (index * rowSpacing);
+      const stdText = item.isNA ? 'NA' : this.formatCurrency(item.standard || 0);
+      page.drawText(stdText, { x: 350, y: y, size: 9, font: font });
+
+      let launchText = '';
+      if (item.isNA) launchText = 'NA';
+      else if (item.isComplimentary) launchText = 'Complimentary';
+      else launchText = this.formatCurrency(item.launch || 0);
+
+      page.drawText(launchText, {
+        x: 480,
+        y: y,
+        size: 9,
+        font: item.isComplimentary ? boldFont : font,
+        color: item.isComplimentary ? rgb(0.1, 0.5, 0.1) : rgb(0, 0, 0)
+      });
+    });
+
+    const totalY = startY - (11 * rowSpacing);
+    page.drawText(this.formatCurrency(data.standardSubtotal || 0), { x: 350, y: totalY, size: 10, font: boldFont });
+    page.drawText(this.formatCurrency(data.launchSubtotal || 0), { x: 480, y: totalY, size: 10, font: boldFont });
+
+    const gstY = startY - (12 * rowSpacing);
+    page.drawText(this.formatCurrency(data.standardTax || 0), { x: 350, y: gstY, size: 10, font: font });
+    page.drawText(this.formatCurrency(data.launchTax || 0), { x: 480, y: gstY, size: 10, font: font });
+
+    const grandY = startY - (13 * rowSpacing);
+    page.drawText(this.formatCurrency(data.standardGrandTotal || 0), { x: 350, y: grandY, size: 11, font: boldFont });
+    page.drawText(this.formatCurrency(data.launchGrandTotal || 0), { x: 480, y: grandY, size: 11, font: boldFont });
+
+    const amountInWords = data.launchGrandTotalInWords || '';
+    page.drawText(amountInWords, { x: 100, y: height - 565, size: 10, font: boldFont });
+  }
+
+  private formatDate(dateString: any): string {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      });
+    } catch (e) {
+      return String(dateString);
+    }
+  }
+
+  private formatCurrency(amount: number): string {
+    if (!amount || amount === 0) return '0';
+    return amount.toLocaleString('en-IN');
   }
 
   // Generate simple email body

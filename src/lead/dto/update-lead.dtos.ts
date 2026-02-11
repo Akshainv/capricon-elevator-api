@@ -39,7 +39,9 @@ export class UpdateLeadDto {
     'Won',
     'Lost',
     'Pending',
-    'Follow-Up'
+    'Follow-Up',
+    'Junk',
+    'Junk Lead'
   ])
   status?: string;
 
@@ -52,6 +54,10 @@ export class UpdateLeadDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
 
   @IsOptional()
   @IsBoolean()

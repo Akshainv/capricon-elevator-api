@@ -6,7 +6,10 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Lead, LeadDocument } from './schemas/lead.schema';
 import { assignLead, assignLeadDocument } from '../lead/schemas/assign.lead.schema'
 import { CreateAssignLeadDto } from '../lead/dto/create-assign-lead.dto';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { NotificationsService } from '../notifications/notifications.service';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { Employee, EmployeeDocument } from '../employee/schemas/employeeSchema';
 
 @Injectable()
 export class LeadService {
@@ -14,6 +17,9 @@ export class LeadService {
     @InjectModel(Lead.name) private LeadModel: Model<LeadDocument>,
     @InjectModel(assignLead.name)
     private assignLeadModel: Model<assignLeadDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
+    private notificationsService: NotificationsService,
   ) { }
 
   async createLead(dto: CreateLeadDto) {
@@ -30,10 +36,74 @@ export class LeadService {
 
     const lead = await this.LeadModel.create(dto);
 
+    // ✅ NOTIFY ADMINS of new lead (except the creator)
+    try {
+      const admins = await this.userModel.find({
+        role: 'admin',
+        _id: { $ne: lead.createdBy }
+      }).exec();
+      for (const admin of admins) {
+        await this.notificationsService.create({
+          icon: 'fa-user-plus',
+          title: 'New Lead Registered',
+          message: `A new lead ${lead.fullName} has registered via ${lead.leadSource}.`,
+          time: new Date().toISOString(),
+          type: 'info',
+          isRead: false,
+          userId: admin._id.toString(),
+          leadId: lead._id.toString(),
+          actionLink: '/admin-leads'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to send admin notification:', error);
+    }
+
     return {
       message: 'Lead created successfully',
-      data: lead,
+      data: await this.enrichLeadWithCreator(lead),
     };
+  }
+
+  private async enrichLeadWithCreator(lead: any) {
+    const leadObj = lead.toObject ? lead.toObject() : lead;
+    let createdBySalesName = 'Unknown';
+    const creatorId = lead.createdBy ? lead.createdBy.toString() : null;
+
+    if (creatorId) {
+      try {
+        // 1. Try Employee Model
+        const employee = await this.employeeModel.findById(creatorId).exec();
+        if (employee) {
+          createdBySalesName = employee.fullName;
+        } else {
+          // 2. Try User Model (Admins)
+          const user = await this.userModel.findById(creatorId).exec();
+          if (user) {
+            createdBySalesName = 'Admin (' + (user.email ? user.email.split('@')[0] : 'Unknown') + ')';
+          } else {
+            // 3. Fallback: Check if creatorId is actually an email (legacy/edge case)
+            const userByEmail = await this.userModel.findOne({ email: creatorId }).exec();
+            if (userByEmail) {
+              createdBySalesName = 'Admin (' + (userByEmail.email ? userByEmail.email.split('@')[0] : 'Unknown') + ')';
+            } else {
+              const empByEmail = await this.employeeModel.findOne({ email: creatorId }).exec();
+              if (empByEmail) {
+                createdBySalesName = empByEmail.fullName;
+              } else {
+                // If nothing found, return early with ID for frontend fallback
+                console.warn(`[WARN] No creator found for ID/Email: ${creatorId}`);
+                createdBySalesName = creatorId;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`[ERROR] Failed to resolve creator for ${creatorId}:`, err);
+        createdBySalesName = creatorId; // Pass ID on error
+      }
+    }
+    return { ...leadObj, createdBySalesName };
   }
 
   async getAllLeads() {
@@ -42,10 +112,15 @@ export class LeadService {
       throw new HttpException('No leads found', HttpStatus.NOT_FOUND);
     }
 
+    console.log(`[DEBUG] getAllLeads: Found ${leads.length} leads. Resolving creator names...`);
+
+    // Resolve createdBy names
+    const enrichedLeads = await Promise.all(leads.map(lead => this.enrichLeadWithCreator(lead)));
+
     return {
       message: 'Leads fetched successfully',
-      count: leads.length,
-      data: leads,
+      count: enrichedLeads.length,
+      data: enrichedLeads,
     };
   }
 
@@ -57,7 +132,7 @@ export class LeadService {
 
     return {
       message: 'Lead fetched successfully',
-      data: lead,
+      data: await this.enrichLeadWithCreator(lead),
     };
   }
 
@@ -82,10 +157,12 @@ export class LeadService {
       ]
     }).exec();
 
+    const enrichedLeads = await Promise.all(leads.map(lead => this.enrichLeadWithCreator(lead)));
+
     return {
       message: 'Leads created by user fetched successfully',
-      count: leads.length,
-      data: leads,
+      count: enrichedLeads.length,
+      data: enrichedLeads,
     };
   }
 
@@ -104,10 +181,12 @@ export class LeadService {
       console.log(`  - Lead: ${lead.fullName}, assignedTo: ${lead.assignedTo}, createdBy: ${lead.createdBy}, status: ${lead.status}`);
     });
 
+    const enrichedLeads = await Promise.all(leads.map(lead => this.enrichLeadWithCreator(lead)));
+
     return {
       message: 'Leads assigned to user fetched successfully',
-      count: leads.length,
-      data: leads,
+      count: enrichedLeads.length,
+      data: enrichedLeads,
     };
   }
 
@@ -132,10 +211,12 @@ export class LeadService {
       ]
     }).exec();
 
+    const enrichedLeads = await Promise.all(leads.map(lead => this.enrichLeadWithCreator(lead)));
+
     return {
       message: 'Unassigned and unconverted leads fetched successfully',
-      count: leads.length,
-      data: leads,
+      count: enrichedLeads.length,
+      data: enrichedLeads,
     };
   }
 
@@ -167,7 +248,7 @@ export class LeadService {
 
     return {
       message: 'Lead updated successfully',
-      data: updatedLead,
+      data: await this.enrichLeadWithCreator(updatedLead),
     };
   }
 
@@ -196,7 +277,7 @@ export class LeadService {
 
     return {
       message: 'Lead status updated successfully',
-      data: updatedLead,
+      data: await this.enrichLeadWithCreator(updatedLead),
     };
   }
 
@@ -238,13 +319,29 @@ export class LeadService {
     const savedAssignment = await assign.save();
     console.log('Backend: Assignment record created:', savedAssignment._id);
 
-    // ✅ When assigning leads, set status to 'Meeting Fixed' (not 'Qualified')
+    // ✅ NOTIFY EMPLOYEE of new assignment
+    try {
+      await this.notificationsService.create({
+        icon: 'fa-user-check',
+        title: 'New Lead Assigned',
+        message: `You have been assigned ${dto.leadIds.length} new lead(s).`,
+        time: new Date().toISOString(),
+        type: 'success',
+        isRead: false,
+        userId: dto.assignedSales,
+        actionLink: '/leads'
+      });
+    } catch (error) {
+      console.error('Failed to send employee notification:', error);
+    }
+
+    // ✅ When assigning leads, keep status as 'Seeded Lead'
     const updateResult = await this.LeadModel.updateMany(
       { _id: { $in: dto.leadIds } },
       {
         $set: {
           assignedTo: dto.assignedSales,
-          status: 'Meeting Fixed'  // ✅ FIXED: Changed from 'Qualified' to valid status
+          status: 'Seeded Lead'  // ✅ FIXED: Changed from 'Meeting Fixed' to 'Seeded Lead'
         }
       }
     ).exec();

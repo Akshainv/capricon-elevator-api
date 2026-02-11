@@ -19,7 +19,7 @@ import { UpdateQuotationDto, UpdateQuotationStatusDto } from './dto/update-quota
 
 @Controller('api/quotation')
 export class QuotationController {
-  constructor(private readonly quotationService: QuotationService) {}
+  constructor(private readonly quotationService: QuotationService) { }
 
   @Post()
   async create(

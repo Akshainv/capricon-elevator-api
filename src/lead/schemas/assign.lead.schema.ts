@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Lead } from 'src/lead/schemas/lead.schema';
+import { Lead } from './lead.schema';
 import { Document, Types } from 'mongoose';
 
 export type assignLeadDocument = assignLead & Document;

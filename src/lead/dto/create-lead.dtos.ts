@@ -1,34 +1,43 @@
 import { IsEmail, IsEnum, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
-export class CreateLeadDto{
+export class CreateLeadDto {
     @IsNotEmpty()
     @IsString()
-    fullName:string
+    fullName: string
 
     @IsEmail()
-    email:string
+    email: string
 
     @IsNotEmpty()
     @IsString()
-    phoneNumber:string
+    phoneNumber: string
 
     @IsOptional()
     @IsString()
-    companyName?:string
+    companyName?: string
 
     @IsString()
     @IsEnum(['Walk-in', 'Website', 'Reference', 'Phone Call', 'Email', 'Social Media', 'Other'])
-    leadSource:string
+    leadSource: string
 
     @IsOptional()
     @IsString()
-    assignedTo?:string
+    @IsEnum(['Seeded Lead', 'Meeting Fixed', 'Meeting Completed', 'CS Executed', 'New', 'Contacted', 'Visit Scheduled', 'Visit Completed', 'Qualified', 'Quoted', 'Won', 'Lost', 'Pending', 'Follow-Up', 'Junk', 'Junk Lead'])
+    status?: string
 
     @IsOptional()
     @IsString()
-    notes?:string
+    assignedTo?: string
+
+    @IsOptional()
+    @IsString()
+    notes?: string
+
+    @IsOptional()
+    @IsString()
+    address?: string
 
     @IsNotEmpty()
     @IsString()
-    createdBy:string
+    createdBy: string
 }
