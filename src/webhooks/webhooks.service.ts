@@ -5,7 +5,7 @@ import * as crypto from 'crypto';
 export class WebhooksService {
     private readonly logger = new Logger(WebhooksService.name);
 
-    verifyWebhook(mode: string, token: string, challenge: string): string {
+    verifyWebhook(mode: string, token: string, challenge: string): string | null {
         const verifyToken = process.env.META_VERIFY_TOKEN || 'capricon_crm_webhook_verify';
 
         if (mode === 'subscribe' && token === verifyToken) {
@@ -38,7 +38,7 @@ export class WebhooksService {
     }
 
     private verifySignature(signature: string, payload: any): boolean {
-        const secret = process.env.META_APP_SECRET;
+        const secret = process.env.META_APP_SECRET || '';
         const expectedSignature = crypto
             .createHmac('sha256', secret)
             .update(JSON.stringify(payload))
