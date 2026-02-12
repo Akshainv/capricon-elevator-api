@@ -7,7 +7,13 @@ import { join } from 'path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Increase payload size limits for PDF generation with images
+  const express = require('express');
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
   app.useGlobalPipes(new ValidationPipe({
+
     whitelist: true,
     forbidNonWhitelisted: false,
     transform: true,

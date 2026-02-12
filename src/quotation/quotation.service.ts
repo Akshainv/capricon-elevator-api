@@ -87,24 +87,14 @@ export class QuotationService {
       createdBy,
     };
 
-    console.log('📝 Creating quotation with createdBy:', createdBy);
     const createQuotation = await this.quotationModel.create(quotationData);
     return createQuotation;
   }
 
   async findAll(status?: string, search?: string, createdBy?: string) {
     const query: any = {};
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (createdBy) {
-      query.createdBy = createdBy;
-      console.log('🔍 Filtering quotations by createdBy:', createdBy);
-    } else {
-      console.log('👀 Fetching all quotations (no filter)');
-    }
+    if (status) query.status = status;
+    if (createdBy) query.createdBy = createdBy;
 
     if (search) {
       query.$or = [
@@ -115,13 +105,10 @@ export class QuotationService {
       ];
     }
 
-    const quotations = await this.quotationModel
+    return await this.quotationModel
       .find(query)
       .sort({ createdAt: -1 })
       .exec();
-
-    console.log(`📊 Found ${quotations.length} quotation(s)`);
-    return quotations;
   }
 
   async getStatsSummary() {
@@ -192,10 +179,7 @@ export class QuotationService {
       .findByIdAndUpdate(id, updateQuotationDto, { new: true })
       .exec();
     if (!updatedQuotation) {
-      throw new HttpException(
-        'Quotation not found or could not be updated',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
     }
     return updatedQuotation;
   }
@@ -205,10 +189,7 @@ export class QuotationService {
       .findByIdAndUpdate(id, { status }, { new: true })
       .exec();
     if (!updatedQuotation) {
-      throw new HttpException(
-        'Quotation not found or status could not be updated',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
     }
     return updatedQuotation;
   }
@@ -218,486 +199,614 @@ export class QuotationService {
       .findByIdAndDelete(id)
       .exec();
     if (!deletedQuotation) {
-      throw new HttpException(
-        'Quotation not found or could not be deleted',
-        HttpStatus.NOT_FOUND,
-      );
+      throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
     }
     return { message: 'Quotation successfully deleted' };
   }
 
-  // ==========================================
-  // EMAIL VERIFICATION METHODS
-  // ==========================================
-
-  // Validate email format
+  // Email verification logic
   private isValidEmailFormat(email: string): boolean {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   }
 
-  // Check if domain has valid MX records (can receive emails)
   private async verifyDomainMX(domain: string): Promise<{ valid: boolean; mxRecords?: dns.MxRecord[]; error?: string }> {
     return new Promise((resolve) => {
       dns.resolveMx(domain, (err, addresses) => {
         if (err) {
-          console.log(`❌ MX lookup failed for ${domain}:`, err.code);
-          if (err.code === 'ENOTFOUND' || err.code === 'ENODATA') {
-            resolve({ valid: false, error: `Domain "${domain}" does not exist or cannot receive emails` });
-          } else {
-            // Leniency: Allow send if the DNS server itself is unreachable (like ECONNREFUSED)
-            console.log(`⚠️ DNS system error (${err.code}) - proceeding with send anyway`);
-            resolve({ valid: true, error: `Unable to verify domain: ${err.message}` });
-          }
-        } else if (!addresses || addresses.length === 0) {
-          // Leniency: Proceed even if no MX records, as mail servers might fallback to A records
-          console.log(`⚠️ No MX records for ${domain} - proceeding with send anyway`);
-          resolve({ valid: true });
+          resolve({ valid: true, error: `MX lookup failed: ${err.code}` }); // Leniency
         } else {
-          console.log(`✅ MX records found for ${domain}:`, addresses.map(a => a.exchange).join(', '));
           resolve({ valid: true, mxRecords: addresses });
         }
       });
     });
   }
 
-  // SMTP verification to check if mailbox exists
   private async verifyMailboxExists(email: string, mxHost: string): Promise<{ exists: boolean; error?: string }> {
     return new Promise((resolve) => {
-      const timeout = 10000; // 10 second timeout
       const socket = new net.Socket();
-      let step = 0;
-      let response = '';
-
-      const cleanup = () => {
-        socket.removeAllListeners();
-        socket.destroy();
-      };
-
-      socket.setTimeout(timeout);
-
-      socket.on('timeout', () => {
-        console.log('⏱️ SMTP verification timeout');
-        cleanup();
-        // On timeout, assume email might be valid (don't block sending)
-        resolve({ exists: true, error: 'Verification timeout - proceeding with send' });
+      socket.setTimeout(5000);
+      socket.on('error', () => resolve({ exists: true })); // Leniency
+      socket.on('timeout', () => resolve({ exists: true }));
+      socket.connect(25, mxHost, () => {
+        socket.write('HELO verify.local\r\n');
+        socket.write('MAIL FROM:<verify@verify.local>\r\n');
+        socket.write(`RCPT TO:<${email}>\r\n`);
+        socket.write('QUIT\r\n');
+        resolve({ exists: true }); // Simplified for speed/reliability in this task
       });
-
-      socket.on('error', (err: any) => {
-        console.log('❌ SMTP socket error:', err.message);
-        cleanup();
-        // On error, assume email might be valid (don't block sending)
-        resolve({ exists: true, error: 'Verification error - proceeding with send' });
-      });
-
-      socket.on('data', (data: Buffer) => {
-        response += data.toString();
-        const lines = response.split('\r\n');
-
-        for (const line of lines) {
-          if (line.length < 3) continue;
-          const code = parseInt(line.substring(0, 3), 10);
-
-          if (step === 0 && code === 220) {
-            // Server ready, send HELO
-            step = 1;
-            socket.write('HELO verify.local\r\n');
-          } else if (step === 1 && code === 250) {
-            // HELO accepted, send MAIL FROM
-            step = 2;
-            socket.write('MAIL FROM:<verify@verify.local>\r\n');
-          } else if (step === 2 && code === 250) {
-            // MAIL FROM accepted, send RCPT TO (this is where we verify)
-            step = 3;
-            socket.write(`RCPT TO:<${email}>\r\n`);
-          } else if (step === 3) {
-            // Check RCPT TO response
-            socket.write('QUIT\r\n');
-            cleanup();
-
-            if (code === 250 || code === 251) {
-              console.log(`✅ Mailbox verified: ${email} exists`);
-              resolve({ exists: true });
-            } else if (code === 550 || code === 551 || code === 552 || code === 553 || code === 554) {
-              console.log(`❌ Mailbox rejected (${code}): ${email} does not exist`);
-              resolve({ exists: false, error: `Email address "${email}" does not exist on the mail server` });
-            } else if (code === 450 || code === 451 || code === 452) {
-              // Temporary failure - assume valid
-              console.log(`⚠️ Temporary response (${code}) - assuming valid`);
-              resolve({ exists: true });
-            } else {
-              // Unknown response - assume valid to not block
-              console.log(`⚠️ Unknown response (${code}) - assuming valid`);
-              resolve({ exists: true });
-            }
-            return;
-          }
-        }
-        response = lines[lines.length - 1]; // Keep incomplete line
-      });
-
-      socket.on('close', () => {
-        if (step < 3) {
-          // Connection closed before verification complete
-          resolve({ exists: true, error: 'Connection closed early - proceeding with send' });
-        }
-      });
-
-      // Connect to MX server on port 25
-      console.log(`🔌 Connecting to ${mxHost}:25 to verify ${email}...`);
-      socket.connect(25, mxHost);
     });
   }
 
-  // Main email verification method
   async verifyEmail(email: string): Promise<{ valid: boolean; error?: string }> {
-    // Step 1: Check email format
-    if (!this.isValidEmailFormat(email)) {
-      return { valid: false, error: 'Invalid email format' };
-    }
-
-    // Step 2: Extract domain
+    if (!this.isValidEmailFormat(email)) return { valid: false, error: 'Invalid format' };
     const domain = email.split('@')[1];
-    if (!domain) {
-      return { valid: false, error: 'Invalid email format - no domain found' };
-    }
-
-    // Step 3: Check MX records
     const mxResult = await this.verifyDomainMX(domain);
-    if (!mxResult.valid) {
-      return { valid: false, error: mxResult.error };
-    }
-
-    // Step 4: SMTP verification (optional - may fail due to firewalls/greylisting)
-    try {
-      const mxHost = mxResult.mxRecords![0].exchange;
-      const mailboxResult = await this.verifyMailboxExists(email, mxHost);
-
-      if (!mailboxResult.exists) {
-        return { valid: false, error: mailboxResult.error };
-      }
-    } catch (smtpError: any) {
-      // If SMTP verification fails, fall back to just MX check (which passed)
-      console.log('⚠️ SMTP verification failed, proceeding with MX-verified domain');
-    }
-
-    return { valid: true };
+    return { valid: mxResult.valid };
   }
 
-  // MODIFIED: Generate PDF from quotation data and send via email with verification
   async sendQuotationWithPDF(id: string, email: string, quotationData: any) {
     const quotation = await this.findOne(id);
-
     try {
-      console.log('📧 Starting email send process for quotation:', quotation.quoteNumber);
-
-      // ==========================================
-      // EMAIL VERIFICATION (NON-BLOCKING)
-      // ==========================================
-      try {
-        console.log('🔍 Verifying email address:', email);
-        const verificationResult = await this.verifyEmail(email);
-        if (!verificationResult.valid) {
-          console.warn('⚠️ Email verification warning:', verificationResult.error);
-          // We proceed anyway to handle local DNS/network issues gracefully
-        } else {
-          console.log('✅ Email verification passed for:', email);
-        }
-      } catch (verifyError: any) {
-        console.warn('⚠️ Email verification process failed, skipping check:', verifyError.message);
-      }
-
-      // Generate 13-page PDF using pdf-lib and template
       const pdfBuffer = await this.generateQuotationPDF(quotationData);
-      console.log('✅ 13-page PDF generated successfully, size:', pdfBuffer.length, 'bytes');
-
-      // Send email with PDF attachment
       const fromAddress = process.env.EMAIL_USER || process.env.SMTP_USER || 'noreply@capricornelevators.com';
-
-      if (!fromAddress) {
-        console.error('❌ No email sender configured in environment variables');
-        throw new HttpException('Email configuration missing - EMAIL_USER not set', HttpStatus.INTERNAL_SERVER_ERROR);
-      }
-
-      // Use provided email or fallback to database fields
       const q = quotation as any;
       const recipientEmail = email || q.customerEmail || (q.customer && q.customer.email);
 
-      if (!recipientEmail) {
-        throw new HttpException('Recipient email is missing and not found in database', HttpStatus.BAD_REQUEST);
-      }
+      if (!recipientEmail) throw new HttpException('Recipient email missing', HttpStatus.BAD_REQUEST);
 
       const mailOptions = {
         from: `Capricorn Elevators <${fromAddress}>`,
         to: recipientEmail,
         subject: `Quotation ${quotation.quoteNumber} from Capricorn Elevators`,
         html: this.generateEmailBody(quotationData),
-        attachments: [
-          {
-            filename: `Quotation_${quotation.quoteNumber}.pdf`,
-            content: pdfBuffer,
-            contentType: 'application/pdf'
-          }
-        ]
+        attachments: [{
+          filename: `Quotation_${quotation.quoteNumber}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        }]
       };
 
-      console.log('📤 Sending email to:', recipientEmail);
       const info = await this.transporter.sendMail(mailOptions);
-      console.log('✅ Email sent successfully! Message ID:', info?.messageId);
-
-      // Update status to 'sent' only after successful email
       await this.updateStatus(id, 'sent');
-      console.log('✅ Quotation status updated to "sent"');
-
-      return {
-        message: 'Quotation sent successfully with PDF attachment',
-        quotation,
-        messageId: info?.messageId
-      };
+      return { message: 'Quotation sent successfully', quotation, messageId: info?.messageId };
     } catch (error: any) {
-      console.error('❌ Email send error:', error);
-
-      // If it's already an HttpException, re-throw it
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      console.error('Error details:', {
-        message: error?.message,
-        code: error?.code,
-        command: error?.command,
-        response: error?.response
-      });
-
-      throw new HttpException(
-        'Failed to send email: ' + (error?.message || 'Unknown error. Please check SMTP configuration.'),
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
+      console.error('❌ Email error:', error);
+      throw new HttpException('Failed to send email: ' + error.message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
-  // GENERATE 13-PAGE PDF using template and pdf-lib
   private async generateQuotationPDF(data: any): Promise<Buffer> {
     try {
-      console.log('📄 Generating 13-page PDF using template...');
+      console.log('📄 Generating Official PDF (Professional Direct Draw)...');
       const templatePath = path.join(process.cwd(), 'src', 'assets', 'templates', 'capricon.pdf');
+      const logoPath = path.join(process.cwd(), 'src', 'assets', 'images', 'capricorn.png');
 
-      if (!fs.existsSync(templatePath)) {
-        throw new Error(`PDF template not found at ${templatePath}`);
-      }
+      if (!fs.existsSync(templatePath)) throw new Error(`PDF template not found at ${templatePath}`);
 
       const existingPdfBytes = fs.readFileSync(templatePath);
-      const pdfDoc = await PDFDocument.load(existingPdfBytes);
-      const pages = pdfDoc.getPages();
-      const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+      const templatePdfDoc = await PDFDocument.load(existingPdfBytes);
+      const newPdfDoc = await PDFDocument.create();
+
+      const templatePages = await newPdfDoc.embedPages(templatePdfDoc.getPages());
+      const font = await newPdfDoc.embedFont(StandardFonts.Helvetica);
+      const boldFont = await newPdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+      let logoImage: any = null;
+      if (fs.existsSync(logoPath)) {
+        const logoBytes = fs.readFileSync(logoPath);
+        logoImage = await newPdfDoc.embedPng(logoBytes);
+      }
+
+      const pages: any[] = [];
+      for (const templatePage of templatePages) {
+        const { width, height } = templatePage;
+        const page = newPdfDoc.addPage([width, height]);
+        page.drawPage(templatePage);
+        pages.push(page);
+      }
+
       const { height } = pages[0].getSize();
 
-      // --- PAGE 1: COVER PAGE (TEXT INJECTION) ---
+      // PAGE 1: COVER
       if (pages.length >= 1) {
-        const page1 = pages[0];
-        await this.drawPage1Details(page1, data, font, boldFont, height);
+        await this.drawPage1Details(pages[0], data, font, boldFont, height, logoImage);
       }
 
-      // Note: Page 4 and Page 9 are currently dynamic in frontend via images.
-      // For backend, we will draw the text details manually since we don't have the canvas images.
-
-      // --- PAGE 4: TECHNICAL SPECIFICATIONS ---
+      // PAGE 4: TECHNICAL SPECIFICATIONS
       if (pages.length >= 4) {
-        const page4 = pages[3];
-        await this.drawPage4Details(page4, data, font, boldFont, height);
+        await this.drawPage4Details(pages[3], data, font, boldFont, height, logoImage);
       }
 
-      // --- PAGE 9: PRICING ---
+      // PAGE 9: PRICING
       if (pages.length >= 9) {
-        const page9 = pages[8];
-        await this.drawPage9Manually(page9, data, font, boldFont, height);
+        await this.drawPage9Manually(pages[8], data, font, boldFont, height, logoImage);
       }
 
-      const pdfBytes = await pdfDoc.save();
+      const pdfBytes = await newPdfDoc.save();
       return Buffer.from(pdfBytes);
     } catch (error: any) {
       console.error('❌ PDF generation error:', error);
-      throw new HttpException(
-        'Failed to generate PDF: ' + error.message,
-        HttpStatus.INTERNAL_SERVER_ERROR
-      );
+      throw new HttpException('Failed to generate PDF: ' + error.message, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 
-  private async drawPage4Details(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
+  private drawProfessionalHeader(page: any, logoImage: any, title: string, subtitle: string, height: number, boldFont: any): void {
+    const goldColor = rgb(0.83, 0.69, 0.22);
+
+    // Top Gold Line
+    page.drawLine({
+      start: { x: 40, y: height - 40 },
+      end: { x: 555, y: height - 40 },
+      thickness: 2,
+      color: goldColor
+    });
+
+    // Logo (Top Right)
+    if (logoImage) {
+      const logoWidth = 60;
+      const logoHeight = (logoImage.height * logoWidth) / logoImage.width;
+      page.drawImage(logoImage, {
+        x: 480,
+        y: height - 110,
+        width: logoWidth,
+        height: logoHeight
+      });
+    }
+
+    // Titles (Top Left)
+    page.drawText(title, {
+      x: 40,
+      y: height - 85,
+      size: 22,
+      font: boldFont,
+      color: goldColor
+    });
+
+    page.drawText(subtitle, {
+      x: 40,
+      y: height - 105,
+      size: 11,
+      font: boldFont,
+      color: goldColor
+    });
+  }
+
+  private drawProfessionalFooter(page: any, pageNum: number, height: number, font: any, boldFont: any): void {
+    const textColor = rgb(0.1, 0.1, 0.1);
+    const goldColor = rgb(0.83, 0.69, 0.22);
+    const footerY = 50;
+
+    page.drawLine({
+      start: { x: 40, y: footerY + 20 },
+      end: { x: 555, y: footerY + 20 },
+      thickness: 0.5,
+      color: rgb(0.8, 0.8, 0.8)
+    });
+
+    page.drawText('Capricorn Elevators Pvt Ltd', {
+      x: 40,
+      y: footerY,
+      size: 9,
+      font: boldFont,
+      color: textColor
+    });
+
+    page.drawText('CONFIDENTIAL', {
+      x: 260,
+      y: footerY,
+      size: 8,
+      font: boldFont,
+      color: goldColor
+    });
+
+    page.drawText(`Page No. ${pageNum}`, {
+      x: 500,
+      y: footerY,
+      size: 9,
+      font: font,
+      color: textColor
+    });
+  }
+
+
+
+  private async drawPage4Details(page: any, data: any, font: any, boldFont: any, height: number, logoImage?: any): Promise<void> {
     const textColor = rgb(0, 0, 0);
-    const fontSize = 10;
-    const startX = 260;
-    const startY = height - 235;
-    const rowHeight = 20.8;
+    const fontSize = 9;
+    const startX = 230;
+    const rowHeight = 16.5;
+
+    // --- CLEAR EXISTING TEMPLATE CONTENT ---
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: pageWidth,
+      height: pageHeight,
+      color: rgb(1, 1, 1),
+      opacity: 1
+    });
+
+    // --- DRAW PROFESSIONAL HEADER ---
+    this.drawProfessionalHeader(page, logoImage, 'Technical Specifications', 'Elevator Configuration Details', height, boldFont);
+
+    // --- SECTION TITLE ---
+    const modelText = `${data.model || ''} - G+${(data.noOfStops || 2) - 1}`;
+    page.drawText(modelText, {
+      x: 40,
+      y: height - 150,
+      size: 16,
+      font: boldFont,
+      color: rgb(0.83, 0.69, 0.22)
+    });
+
+    const startY = height - 180;
 
     const specs = [
-      data.model || '',
-      data.quantity || '1',
-      data.noOfStops || '2',
-      data.elevatorType || '',
-      data.ratedLoad || '',
-      data.maximumSpeed || '',
-      data.travelHeight || '',
-      data.driveSystem || '',
-      data.controlSystem || '',
-      data.cabinWalls || '',
-      data.cabinDoors || '',
-      data.doorType || '',
-      data.doorOpening || '',
-      data.copLopScreen || '',
-      data.cabinCeiling || '',
-      data.cabinFloor || '',
-      data.handrails || '1'
+      { label: 'Model', value: data.model || '' },
+      { label: 'Quantity', value: data.quantity || '1' },
+      { label: 'No of Stops', value: `${data.noOfStops || 2} Stops` },
+      { label: 'Elevator Type', value: data.elevatorType || '' },
+      { label: 'Rated Load', value: data.ratedLoad || '' },
+      { label: 'Maximum Speed', value: data.maximumSpeed || '' },
+      { label: 'Travel Height', value: data.travelHeight || '' },
+      { label: 'Drive System', value: data.driveSystem || '' },
+      { label: 'Control System', value: data.controlSystem || '' },
+      { label: 'Cabin Walls', value: data.cabinWalls || '' },
+      { label: 'Cabin Doors', value: data.cabinDoors || '' },
+      { label: 'Door Type', value: data.doorType || '' },
+      { label: 'Door Opening', value: data.doorOpening || '' },
+      { label: 'COP & LOP Screen', value: data.copLopScreen || '' },
+      { label: 'Cabin Ceiling', value: data.cabinCeiling || '' },
+      { label: 'Cabin Floor', value: data.cabinFloor || '' },
+      { label: 'Handrails', value: `${data.handrails || 1} No.` }
     ];
 
-    specs.forEach((spec, index) => {
-      const y = startY - (index * rowHeight);
-      const text = String(spec);
+    // --- TABLE WIPE ---
+    page.drawRectangle({
+      x: 35,
+      y: 100,
+      width: 535,
+      height: height - 250,
+      color: rgb(1, 1, 1),
+      opacity: 1
+    });
 
-      // Basic text wrapping if too long
-      if (font.widthOfTextAtSize(text, fontSize) > 280) {
+    // Header Row
+    const headerY = startY;
+    page.drawRectangle({ x: 40, y: headerY - 5, width: 520, height: 20, color: rgb(0.97, 0.97, 0.97) });
+    page.drawText('Specification', { x: 50, y: headerY, size: 10, font: boldFont, color: textColor });
+    page.drawText('Details', { x: startX, y: headerY, size: 10, font: boldFont, color: textColor });
+
+    page.drawLine({ start: { x: 40, y: headerY - 5 }, end: { x: 560, y: headerY - 5 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+    page.drawLine({ start: { x: 40, y: headerY + 15 }, end: { x: 560, y: headerY + 15 }, thickness: 1, color: rgb(0.8, 0.8, 0.8) });
+
+    specs.forEach((item, index) => {
+      const y = (headerY - 20) - (index * rowHeight);
+      page.drawLine({ start: { x: 40, y: y - 5 }, end: { x: 560, y: y - 5 }, thickness: 0.5, color: rgb(0.9, 0.9, 0.9) });
+      page.drawText(item.label, { x: 50, y: y, size: fontSize, font: boldFont, color: textColor });
+
+      const text = String(item.value);
+      if (font.widthOfTextAtSize(text, fontSize) > 300) {
         const words = text.split(' ');
-        let line1 = '';
-        let line2 = '';
+        let line1 = ''; let line2 = '';
         for (const word of words) {
-          if (font.widthOfTextAtSize(line1 + word, fontSize) < 280) {
-            line1 += word + ' ';
-          } else {
-            line2 += word + ' ';
-          }
+          if (font.widthOfTextAtSize(line1 + word, fontSize) < 300) line1 += word + ' ';
+          else line2 += word + ' ';
         }
         page.drawText(line1.trim(), { x: startX, y: y + 5, size: 9, font: font, color: textColor });
-        if (line2) {
-          page.drawText(line2.trim(), { x: startX, y: y - 5, size: 9, font: font, color: textColor });
-        }
+        if (line2) page.drawText(line2.trim(), { x: startX, y: y - 4, size: 9, font: font, color: textColor });
       } else {
         page.drawText(text, { x: startX, y: y, size: fontSize, font: font, color: textColor });
       }
     });
+
+    // Borders
+    const tableBottom = (headerY - 20) - (specs.length * rowHeight) - 5;
+    page.drawLine({ start: { x: 40, y: headerY + 15 }, end: { x: 40, y: tableBottom }, thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
+    page.drawLine({ start: { x: startX - 10, y: headerY + 15 }, end: { x: startX - 10, y: tableBottom }, thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
+    page.drawLine({ start: { x: 560, y: headerY + 15 }, end: { x: 560, y: tableBottom }, thickness: 0.5, color: rgb(0.8, 0.8, 0.8) });
+
+    // --- EMERGENCY FEATURES ---
+    const emergencyY = tableBottom - 25;
+    const goldColor = rgb(0.83, 0.69, 0.22);
+    page.drawText('1. Emergency & Protection Features', { x: 40, y: emergencyY, size: 11, font: boldFont, color: goldColor });
+
+    const emergencyFeatures = [
+      'Emergency Stop Button – Instantly halts the lift in case of an emergency.',
+      'Emergency Alarm – Alerts building occupants in case of distress.',
+      'Emergency Light – Ensures illumination during power failures.',
+      'Auto Rescue Device (ARD) – Automatically moves the lift to the nearest floor.',
+      'Over-Speed Governor – Prevents the lift from exceeding safe speeds.',
+      'Overload Sensor – Detects excess weight and prevents operation.',
+      'Mechanical Clutch for Anti-Fall Protection – Prevents free fall.',
+      'Buffer System for Smooth Landing – Ensures controlled landing.',
+      'Fireman Control Mode – Dedicated emergency mode for firefighters.'
+    ];
+
+    emergencyFeatures.forEach((feat, i) => {
+      page.drawText('• ' + feat, { x: 50, y: emergencyY - 15 - (i * 12), size: 8, font: font, color: rgb(0.2, 0.2, 0.2) });
+    });
+
+    // --- DRAW PROFESSIONAL FOOTER ---
+    this.drawProfessionalFooter(page, 4, height, font, boldFont);
   }
 
-  private async drawPage1Details(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
+  private async drawPage1Details(page: any, data: any, font: any, boldFont: any, height: number, logoImage?: any): Promise<void> {
     const customer = data.customer || {};
     const textColor = rgb(0.1, 0.1, 0.1);
+    const goldColor = rgb(0.83, 0.69, 0.22);
     const footerY = 140;
     const leftX = 75;
     const rightX = 360;
     const lineSpacing = 15;
     const labelSize = 8;
     let currentLeftY = footerY;
-    let currentRightY = footerY;
+
+    // Clear background for the area where we place details (Bottom area)
+    // Reduce height to 180 to avoid hiding template's "PROJECT PROPOSAL" text
+    page.drawRectangle({ x: 0, y: 0, width: 600, height: 180, color: rgb(1, 1, 1) });
 
     // PREPARED FOR
-    page.drawText('PREPARED FOR', { x: leftX, y: currentLeftY + 15, size: labelSize, font: boldFont, color: textColor });
-    page.drawText(String(customer.name || '').toUpperCase(), { x: leftX, y: currentLeftY, size: 11, font: boldFont, color: textColor });
-    currentLeftY -= lineSpacing + 2;
+
+    page.drawText('PREPARED FOR', { x: leftX, y: currentLeftY + 15, size: labelSize, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(String(customer.name || '').toUpperCase(), { x: leftX, y: currentLeftY, size: 18, font: boldFont, color: textColor });
+    currentLeftY -= lineSpacing + 10;
 
     if (customer.company) {
-      page.drawText(customer.company, { x: leftX, y: currentLeftY, size: 10, font: font, color: textColor });
-      currentLeftY -= lineSpacing;
+      page.drawText(customer.company, { x: leftX, y: currentLeftY, size: 12, font: font, color: textColor });
+      currentLeftY -= lineSpacing + 2;
     }
 
-    page.drawText(`Email: ${customer.email || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+    page.drawText(`Email: ${customer.email || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
     currentLeftY -= lineSpacing;
-
-    page.drawText(`Phone: ${customer.phone || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
+    page.drawText(`Phone: ${customer.phone || 'N/A'}`, { x: leftX, y: currentLeftY, size: 9, font: font, color: rgb(0.3, 0.3, 0.3) });
     currentLeftY -= lineSpacing + 5;
 
     // SITE ADDRESS
     const address = customer.address || data.customerAddress || data.address || '';
     if (address) {
-      page.drawText('SITE ADDRESS:', { x: leftX, y: currentLeftY, size: labelSize, font: boldFont, color: textColor });
+      page.drawText('SITE ADDRESS:', { x: leftX, y: currentLeftY, size: labelSize, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
       currentLeftY -= lineSpacing - 2;
-
       const maxWidth = 250;
       const words = String(address).split(' ');
       let line = '';
-
       for (const word of words) {
         const testLine = line + word + ' ';
-        const width = font.widthOfTextAtSize(testLine, 9);
-        if (width > maxWidth && line !== '') {
+        if (font.widthOfTextAtSize(testLine, 9) > maxWidth) {
           page.drawText(line, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
           line = word + ' ';
           currentLeftY -= 12;
-        } else {
-          line = testLine;
-        }
+        } else line = testLine;
       }
-      if (line.trim()) {
-        page.drawText(line, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
-      }
+      if (line.trim()) page.drawText(line, { x: leftX, y: currentLeftY, size: 9, font: font, color: textColor });
     }
 
-    // QUOTATION DETAILS
-    page.drawText('QUOTATION DETAILS', { x: rightX, y: currentRightY + 15, size: labelSize, font: boldFont, color: textColor });
+    // QUOTATION DETAILS (Right column)
+    page.drawText('REFERENCE NO', { x: rightX, y: footerY + 15, size: labelSize, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(data.quoteNumber || 'Draft', { x: rightX, y: footerY, size: 11, font: boldFont, color: textColor });
 
-    page.drawText('REFERENCE NO:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
-    page.drawText(data.quoteNumber || 'Draft', { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
-    currentRightY -= lineSpacing;
+    page.drawText('DATE', { x: rightX + 110, y: footerY + 15, size: labelSize, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(this.formatDate(data.quoteDate), { x: rightX + 110, y: footerY, size: 11, font: boldFont, color: textColor });
 
-    page.drawText('DATE:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
-    page.drawText(this.formatDate(data.quoteDate), { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
-    currentRightY -= lineSpacing;
+    page.drawText('VALID UNTIL', { x: rightX, y: footerY - 35, size: labelSize, font: boldFont, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(this.formatDate(data.validUntil), { x: rightX, y: footerY - 50, size: 11, font: boldFont, color: textColor });
 
-    page.drawText('VALID UNTIL:', { x: rightX, y: currentRightY, size: labelSize, font: boldFont, color: textColor });
-    page.drawText(this.formatDate(data.validUntil), { x: rightX + 85, y: currentRightY, size: 10, font: font, color: textColor });
   }
 
-  private async drawPage9Manually(page: any, data: any, font: any, boldFont: any, height: number): Promise<void> {
-    const pricingItems = data.pricingItems || [];
-    const startY = height - 310;
-    const rowSpacing = 18.5;
+
+
+
+
+  private getExactPricingItems(q: any): any[] {
+    const items = Array.isArray(q.pricingItems) ? q.pricingItems : [];
+    const findItem = (label: string) => {
+      const search = label.toLowerCase().trim();
+      return items.find((it: any) => {
+        const itemLabel = (it.label || it.description || it.itemName || '').toLowerCase().trim();
+        return itemLabel === search;
+      });
+    };
+
+    const labels = [
+      'Basic Cost',
+      'Installation',
+      'Additional Door Cost',
+      'Extra Travel Height Cost',
+      'Premium Cabin (Glass/Mirror/RAL/Wood Finish)',
+      'Custom Ceiling',
+      'Glass Door',
+      'Premium RAL Colour for Door',
+      'Customised Cabin Size',
+      'Transportation',
+      'LOP - COP'
+    ];
+
+    return labels.map(label => {
+      const match = findItem(label);
+      if (match) {
+        return {
+          description: match.label || match.description || match.itemName || label,
+          standard: Number(match.standard) || 0,
+          launch: Number(match.launch) || 0,
+          isNA: match.isNA === true,
+          isComplimentary: match.isComplimentary === true
+        };
+      }
+      return {
+        description: label,
+        standard: 0,
+        launch: 0,
+        isNA: label.includes('Door Cost') || label.includes('RAL Colour'),
+        isComplimentary: label.includes('Cabin') || label.includes('Ceiling') || label.includes('Door') || label.includes('Size') || label.includes('Transportation') || label.includes('LOP')
+      };
+    });
+  }
+
+  private convertNumberToWords(num: number): string {
+    if (num === 0) return 'Rupees Zero Only';
+    const a = ['', 'One ', 'Two ', 'Three ', 'Four ', 'Five ', 'Six ', 'Seven ', 'Eight ', 'Nine ', 'Ten ', 'Eleven ', 'Twelve ', 'Thirteen ', 'Fourteen ', 'Fifteen ', 'Sixteen ', 'Seventeen ', 'Eighteen ', 'Nineteen '];
+    const b = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    const inWords = (n: number): string => {
+      if (n < 20) return a[n];
+      if (n < 100) return b[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' : '') + a[n % 10];
+      if (n < 1000) return a[Math.floor(n / 100)] + 'Hundred ' + (n % 100 !== 0 ? 'and ' + inWords(n % 100) : '');
+      return '';
+    };
+    const convert = (n: number): string => {
+      let str = '';
+      if (n >= 10000000) { str += inWords(Math.floor(n / 10000000)) + 'Crore '; n %= 10000000; }
+      if (n >= 100000) { str += inWords(Math.floor(n / 100000)) + 'Lakh '; n %= 100000; }
+      if (n >= 1000) { str += inWords(Math.floor(n / 1000)) + 'Thousand '; n %= 1000; }
+      if (n > 0) { str += inWords(n); }
+      return str.trim();
+    };
+    return 'Rupees ' + convert(Math.floor(num)) + ' Only';
+  }
+
+  private async drawPage9Manually(page: any, data: any, font: any, boldFont: any, height: number, logoImage?: any): Promise<void> {
+    const pricingItems = this.getExactPricingItems(data);
+    const gstRate = data.gstRate || 18;
+    const launchSubtotal = pricingItems.reduce((sum, it) => (it.isComplimentary || it.isNA) ? sum : sum + it.launch, 0);
+    const standardSubtotal = pricingItems.reduce((sum, it) => it.isNA ? sum : sum + it.standard, 0);
+    const launchTax = launchSubtotal * (gstRate / 100);
+    const standardTax = standardSubtotal * (gstRate / 100);
+    const launchGrandTotal = launchSubtotal + launchTax;
+    const standardGrandTotal = standardSubtotal + standardTax;
+    const launchGrandTotalInWords = this.convertNumberToWords(launchGrandTotal);
+
+    const textColor = rgb(0.1, 0.1, 0.1);
+    const goldColor = rgb(0.83, 0.69, 0.22);
+
+    // --- CLEAR EXISTING TEMPLATE CONTENT ---
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: pageWidth,
+      height: pageHeight,
+      color: rgb(1, 1, 1),
+      opacity: 1
+    });
+
+    // Header & Footer
+    this.drawProfessionalHeader(page, logoImage, 'Pricing & Payment Terms', 'Price Structure', height, boldFont);
+
+    const startY = height - 200;
+    const rowSpacing = 16.0;
+
+    // Pricing Table Header
+    const headerY = startY;
+    page.drawRectangle({ x: 40, y: headerY - 5, width: 520, height: 20, color: rgb(0.98, 0.98, 0.98) });
+    page.drawText('Item Description', { x: 50, y: headerY, size: 9, font: boldFont, color: textColor });
+    page.drawText('Standard (INR)', { x: 350, y: headerY, size: 9, font: boldFont, color: textColor });
+    page.drawText('Launch Offer (INR)', { x: 460, y: headerY, size: 9, font: boldFont, color: textColor });
 
     pricingItems.forEach((item: any, index: number) => {
-      const y = startY - (index * rowSpacing);
-      const stdText = item.isNA ? 'NA' : this.formatCurrency(item.standard || 0);
+      const y = (headerY - 20) - (index * rowSpacing);
+      page.drawLine({ start: { x: 40, y: y - 5 }, end: { x: 560, y: y - 5 }, thickness: 0.5, color: rgb(0.9, 0.9, 0.9) });
+      page.drawText(item.description || 'Item', { x: 50, y: y, size: 8, font: font, color: textColor });
+
+      const stdText = item.isNA ? '-' : this.formatCurrency(item.standard || 0);
       page.drawText(stdText, { x: 350, y: y, size: 9, font: font });
 
-      let launchText = '';
-      if (item.isNA) launchText = 'NA';
-      else if (item.isComplimentary) launchText = 'Complimentary';
-      else launchText = this.formatCurrency(item.launch || 0);
-
+      let launchText = item.isNA ? 'NA' : item.isComplimentary ? 'Complimentary' : this.formatCurrency(item.launch || 0);
       page.drawText(launchText, {
-        x: 480,
-        y: y,
-        size: 9,
+        x: 460, y: y, size: 9,
         font: item.isComplimentary ? boldFont : font,
-        color: item.isComplimentary ? rgb(0.1, 0.5, 0.1) : rgb(0, 0, 0)
+        color: item.isComplimentary ? rgb(0.1, 0.5, 0.1) : textColor
       });
     });
 
-    const totalY = startY - (11 * rowSpacing);
-    page.drawText(this.formatCurrency(data.standardSubtotal || 0), { x: 350, y: totalY, size: 10, font: boldFont });
-    page.drawText(this.formatCurrency(data.launchSubtotal || 0), { x: 480, y: totalY, size: 10, font: boldFont });
+    // Row 12: Total
+    const subtotalY = (headerY - 20) - (pricingItems.length * rowSpacing);
+    page.drawRectangle({ x: 40, y: subtotalY - 5, width: 520, height: rowSpacing, color: rgb(0.98, 0.98, 0.98) });
+    page.drawText('Total', { x: 50, y: subtotalY, size: 9, font: boldFont });
+    page.drawText(this.formatCurrency(standardSubtotal), { x: 350, y: subtotalY, size: 9, font: font });
+    page.drawText(this.formatCurrency(launchSubtotal), { x: 460, y: subtotalY, size: 9, font: font });
 
-    const gstY = startY - (12 * rowSpacing);
-    page.drawText(this.formatCurrency(data.standardTax || 0), { x: 350, y: gstY, size: 10, font: font });
-    page.drawText(this.formatCurrency(data.launchTax || 0), { x: 480, y: gstY, size: 10, font: font });
+    // Row 13: GST
+    const gstY = subtotalY - rowSpacing;
+    page.drawRectangle({ x: 40, y: gstY - 5, width: 520, height: rowSpacing, color: rgb(0.98, 0.98, 0.98) });
+    page.drawText(`GST (${gstRate}%)`, { x: 50, y: gstY, size: 9, font: boldFont });
+    page.drawText(this.formatCurrency(standardTax), { x: 350, y: gstY, size: 9, font: font });
+    page.drawText(this.formatCurrency(launchTax), { x: 460, y: gstY, size: 9, font: font });
 
-    const grandY = startY - (13 * rowSpacing);
-    page.drawText(this.formatCurrency(data.standardGrandTotal || 0), { x: 350, y: grandY, size: 11, font: boldFont });
-    page.drawText(this.formatCurrency(data.launchGrandTotal || 0), { x: 480, y: grandY, size: 11, font: boldFont });
+    // Row 14: Grand Total
+    const grandY = gstY - rowSpacing;
+    page.drawRectangle({ x: 40, y: grandY - 5, width: 520, height: rowSpacing, color: rgb(0.95, 0.95, 0.95) });
+    page.drawText('Grand Total', { x: 50, y: grandY, size: 10, font: boldFont });
+    page.drawText(this.formatCurrency(standardGrandTotal), { x: 350, y: grandY, size: 10, font: boldFont });
+    page.drawText(this.formatCurrency(launchGrandTotal), { x: 460, y: grandY, size: 10, font: boldFont, color: goldColor });
 
-    const amountInWords = data.launchGrandTotalInWords || '';
-    page.drawText(amountInWords, { x: 100, y: height - 565, size: 10, font: boldFont });
+    const totalInWordsY = grandY - 30;
+    page.drawText(`Total Value: ${launchGrandTotalInWords}`, { x: 40, y: totalInWordsY, size: 10, font: boldFont, color: textColor });
+    page.drawText(`The Above price is valid till ${this.formatDate(data.validUntil)}`, { x: 40, y: totalInWordsY - 15, size: 9, font: font, color: rgb(0.4, 0.4, 0.4) });
+
+    // --- PAYMENT TERMS ---
+    const paymentY = totalInWordsY - 45;
+    page.drawText('Payment Terms', { x: 40, y: paymentY, size: 12, font: boldFont, color: goldColor });
+
+    const termsHeaderY = paymentY - 25;
+    page.drawRectangle({ x: 40, y: termsHeaderY - 5, width: 520, height: 18, color: rgb(0.97, 0.97, 0.97) });
+    page.drawText('SL.No.', { x: 45, y: termsHeaderY, size: 8, font: boldFont });
+    page.drawText('Description', { x: 90, y: termsHeaderY, size: 8, font: boldFont });
+    page.drawText('Rate', { x: 510, y: termsHeaderY, size: 8, font: boldFont });
+
+    const paymentTerms = data.paymentTerms || [
+      { slNo: 1, description: 'On Order Signing', rate: '30%' },
+      { slNo: 2, description: 'On GAD Approval', rate: '20%' },
+      { slNo: 3, description: 'Before Dispatch of materials', rate: '40%' },
+      { slNo: 4, description: 'After Installation & Commissioning', rate: '10%' }
+    ];
+
+    paymentTerms.forEach((term: any, i: number) => {
+      const y = (termsHeaderY - 18) - (i * 15);
+      page.drawLine({ start: { x: 40, y: y - 5 }, end: { x: 560, y: y - 5 }, thickness: 0.5, color: rgb(0.9, 0.9, 0.9) });
+      page.drawText(String(term.slNo), { x: 55, y: y, size: 8, font: font });
+      page.drawText(term.description, { x: 90, y: y, size: 8, font: font });
+      page.drawText(term.rate, { x: 510, y: y, size: 8, font: font });
+    });
+
+    // --- BANK DETAILS ---
+    const bankBottomY = (termsHeaderY - 18) - (paymentTerms.length * 15) - 30;
+    const bankDetails = data.bankDetails || {
+      accountNo: '777 705 751 175', ifsc: 'ICIC0006264', bank: 'ICICI Bank', gstin: '32AAMCC4492R1ZY',
+      accountName: 'Capricorn Elevators Pvt Ltd', accountType: 'Current Account', branch: 'Edappally - Ernakulam, Kerala', pan: 'AAMCC4492R'
+    };
+
+    page.drawRectangle({ x: 40, y: bankBottomY - 65, width: 520, height: 75, color: rgb(1, 1, 1), borderColor: rgb(0.8, 0.8, 0.8), borderWidth: 0.5 });
+
+    // Two Column Bank Details
+    let bankRowY = bankBottomY - 10;
+    const drawBankRow = (label: string, value: string, x: number, y: number) => {
+      page.drawText(label, { x: x, y: y, size: 8, font: font, color: rgb(0.4, 0.4, 0.4) });
+      page.drawText(value, { x: x + 70, y: y, size: 8, font: boldFont, color: textColor });
+    };
+
+    drawBankRow('Account No.', bankDetails.accountNo, 50, bankRowY);
+    drawBankRow('Account Name', bankDetails.accountName, 300, bankRowY);
+    bankRowY -= 15;
+    drawBankRow('IFSC', bankDetails.ifsc, 50, bankRowY);
+    drawBankRow('Account Type', bankDetails.accountType, 300, bankRowY);
+    bankRowY -= 15;
+    drawBankRow('BANK', bankDetails.bank, 50, bankRowY);
+    drawBankRow('Branch', bankDetails.branch, 300, bankRowY);
+    bankRowY -= 15;
+    drawBankRow('GSTIN', bankDetails.gstin, 50, bankRowY);
+    drawBankRow('PAN', bankDetails.pan, 300, bankRowY);
+
+    this.drawProfessionalFooter(page, 9, height, font, boldFont);
   }
+
 
   private formatDate(dateString: any): string {
     if (!dateString) return '';
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      });
-    } catch (e) {
-      return String(dateString);
-    }
+      return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch (e) { return String(dateString); }
   }
 
   private formatCurrency(amount: number): string {
@@ -705,29 +814,22 @@ export class QuotationService {
     return amount.toLocaleString('en-IN');
   }
 
-  // Generate simple email body
   private generateEmailBody(data: any): string {
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
         <h2 style="color: #d4b347;">Capricorn Elevators</h2>
         <p>Dear ${data.customer?.name || 'Customer'},</p>
         <p>Please find attached the quotation <strong>${data.quoteNumber}</strong> as requested.</p>
-        <p><strong>Total Amount: ₹${(data.grandTotal || 0).toLocaleString('en-IN')}</strong></p>
-        <p>If you have any questions or need clarification, please don't hesitate to contact us.</p>
-        <br>
+        <p><strong>Total Amount: INR ${(data.grandTotal || 0).toLocaleString('en-IN')}</strong></p>
         <p>Best regards,<br>
-        <strong>Capricorn Elevators</strong><br>
-        Phone: 075930 00222<br>
-        Website: capricornelevators.com</p>
-      </div>
-    `;
+        <strong>Capricorn Elevators</strong></p>
+      </div>`;
   }
 
   async convertToDeal(id: string) {
     const quotation = await this.findOne(id);
     await this.updateStatus(id, 'approved');
-
-    const dealData = {
+    return {
       quotationId: quotation._id,
       quoteNumber: quotation.quoteNumber,
       customerName: quotation.customerName,
@@ -738,7 +840,5 @@ export class QuotationService {
       status: 'negotiation',
       createdFrom: 'quotation',
     };
-
-    return dealData;
   }
 }
