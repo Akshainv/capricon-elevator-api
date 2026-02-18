@@ -9,6 +9,7 @@ import {
   UploadedFile,
   BadRequestException,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProfileSettingsService } from './profile-settings.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -16,23 +17,37 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
+import { JwtService } from '@nestjs/jwt';
 
 @Controller('profile-settings')
 export class ProfileSettingsController {
   constructor(
     private readonly profileSettingsService: ProfileSettingsService,
+    private readonly jwtService: JwtService,
   ) { }
 
   /**
    * Extract user ID from JWT token or header (temporary)
    */
   private getUserId(req: any): string {
-    // Try to get from JWT token payload first
+    // 1. Try to get from req.user (populated by guards)
     if (req.user && req.user.sub) {
       return req.user.sub;
     }
 
-    // Fallback to header for testing
+    // 2. Try to decode from Authorization header (standard)
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.split(' ')[1];
+        const payload = this.jwtService.decode(token) as any;
+        if (payload && payload.sub) return payload.sub;
+      } catch (e) {
+        console.error('Failed to decode token in controller:', e);
+      }
+    }
+
+    // 3. Fallback to header for testing (deprecated)
     const userId = req.headers['x-user-id'];
     if (!userId) {
       throw new BadRequestException(

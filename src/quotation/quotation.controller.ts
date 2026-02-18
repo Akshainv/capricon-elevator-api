@@ -12,21 +12,45 @@ import {
   HttpException,
   Query,
   Headers,
+  Req,
 } from '@nestjs/common';
 import { QuotationService } from './quotation.service';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto, UpdateQuotationStatusDto } from './dto/update-quotation.dto';
+import { JwtService } from '@nestjs/jwt';
+import type { Request } from 'express';
 
 @Controller('api/quotation')
 export class QuotationController {
-  constructor(private readonly quotationService: QuotationService) { }
+  constructor(
+    private readonly quotationService: QuotationService,
+    private readonly jwtService: JwtService,
+  ) { }
 
   @Post()
   async create(
     @Body() createQuotationDto: CreateQuotationDto,
-    @Headers('x-user-id') userId?: string,
+    @Req() req: Request,
+    @Headers('x-user-id') customUserId?: string,
   ) {
     try {
+      // 1. Try to get from req.user (populated by guards if present)
+      let userId = (req as any).user?.sub || customUserId;
+
+      // 2. Try to decode from Authorization header (standard)
+      if (!userId) {
+        const authHeader = req.headers['authorization'];
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          try {
+            const token = authHeader.split(' ')[1];
+            const payload = this.jwtService.decode(token) as any;
+            if (payload && payload.sub) userId = payload.sub;
+          } catch (e) {
+            console.error('Failed to decode token in create quotation:', e);
+          }
+        }
+      }
+
       console.log('📝 Creating quotation with userId:', userId);
       const creatorId = userId || 'system';
       const result = await this.quotationService.create(createQuotationDto, creatorId);
@@ -43,12 +67,34 @@ export class QuotationController {
 
   @Get()
   async findAll(
+    @Req() req: Request,
     @Query('status') status?: string,
     @Query('search') search?: string,
-    @Headers('x-user-id') userId?: string,
-    @Headers('x-user-role') userRole?: string,
+    @Headers('x-user-id') customUserId?: string,
+    @Headers('x-user-role') customUserRole?: string,
   ) {
     try {
+      // 1. Try to get from req.user
+      let userId = (req as any).user?.sub || customUserId;
+      let userRole = (req as any).user?.role || customUserRole;
+
+      // 2. Try to decode from Authorization header (standard)
+      if (!userId || !userRole) {
+        const authHeader = req.headers['authorization'];
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+          try {
+            const token = authHeader.split(' ')[1];
+            const payload = this.jwtService.decode(token) as any;
+            if (payload) {
+              if (payload.sub) userId = payload.sub;
+              if (payload.role) userRole = payload.role;
+            }
+          } catch (e) {
+            console.error('Failed to decode token in findAll quotation:', e);
+          }
+        }
+      }
+
       console.log('🔍 Fetching quotations for userId:', userId, 'role:', userRole);
       const createdBy = (userRole === 'employee' && userId) ? userId : undefined;
       const result = await this.quotationService.findAll(status, search, createdBy);

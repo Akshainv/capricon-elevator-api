@@ -40,7 +40,7 @@ export class ProfileSettingsService {
     if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
       profileImageUrl = employeeObj.photo;
     } else {
-      profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+      profileImageUrl = employeeObj.profileImage || employeeObj.photo || undefined;
     }
 
     if (profileImageUrl && !profileImageUrl.startsWith('http')) {
@@ -82,11 +82,11 @@ export class ProfileSettingsService {
     if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
       profileImageUrl = employeeObj.photo;
     } else {
-      profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+      profileImageUrl = employeeObj.profileImage || employeeObj.photo || undefined;
     }
 
     if (profileImageUrl && !profileImageUrl.startsWith('http')) {
-      profileImageUrl = `${baseUrl}/${profileImageUrl}`;
+      profileImageUrl = `${baseUrl}/uploads/${profileImageUrl}`;
     }
 
     return {

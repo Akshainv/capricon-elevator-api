@@ -15,34 +15,18 @@ async function bootstrap() {
   // Trust proxy for Render deployment (corrects req.protocol)
   app.set('trust proxy', 1);
 
-  app.useGlobalPipes(new ValidationPipe({
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+    }),
+  );
 
-    whitelist: true,
-    forbidNonWhitelisted: false,
-    transform: true,
-  }));
-
+  // ✅ FIXED CORS CONFIG (Production Safe)
   app.enableCors({
-    origin: [
-      'http://localhost:4200',
-      'http://localhost:3000',
-      /^http:\/\/localhost:\d+$/,
-      'https://capricon-elevator.vercel.app',
-      'https://capricon-new.vercel.app',
-      'https://capricon-crm-new.vercel.app'
-    ],
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    origin: true,
     credentials: true,
-    allowedHeaders: [
-      'Content-Type',
-      'Accept',
-      'Authorization',
-      'X-Requested-With',
-      'x-user-id',
-      'x-user-role',
-      'X-User-Id',
-      'X-User-Role'
-    ],
   });
 
   // Serve static files from uploads folder
@@ -52,6 +36,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
+
   console.log(`🚀 Application is running on port ${port}`);
 }
 
