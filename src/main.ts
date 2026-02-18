@@ -12,6 +12,9 @@ async function bootstrap() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Trust proxy for Render deployment (corrects req.protocol)
+  app.set('trust proxy', 1);
+
   app.useGlobalPipes(new ValidationPipe({
 
     whitelist: true,
