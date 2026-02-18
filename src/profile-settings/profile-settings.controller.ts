@@ -21,7 +21,7 @@ import { extname } from 'path';
 export class ProfileSettingsController {
   constructor(
     private readonly profileSettingsService: ProfileSettingsService,
-  ) {}
+  ) { }
 
   /**
    * Extract user ID from JWT token or header (temporary)
@@ -31,7 +31,7 @@ export class ProfileSettingsController {
     if (req.user && req.user.sub) {
       return req.user.sub;
     }
-    
+
     // Fallback to header for testing
     const userId = req.headers['x-user-id'];
     if (!userId) {

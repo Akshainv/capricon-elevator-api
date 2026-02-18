@@ -15,7 +15,7 @@ export class EmployeeService {
   constructor(
     @InjectModel(Employee.name)
     private employeeModel: Model<EmployeeDocument>,
-  ) {}
+  ) { }
 
   async generateEmployeeId(): Promise<string> {
     // Find the last employee sorted by employeeId in descending order
@@ -37,22 +37,7 @@ export class EmployeeService {
     return 'EMP' + nextId.toString().padStart(3, '0');
   }
 
-  // Helper method to construct full photo URL
-  private constructPhotoUrl(photo: string | undefined, baseUrl: string): string | undefined {
-    if (!photo) return undefined;
-    return `${baseUrl}/uploads/${photo}`;
-  }
-
-  // Helper method to format employee with photo URL
-  private formatEmployee(employee: EmployeeDocument, baseUrl: string) {
-    const employeeObj = employee.toObject();
-    return {
-      ...employeeObj,
-      photo: this.constructPhotoUrl(employeeObj.photo, baseUrl),
-    };
-  }
-
-  async create(data: CreateEmployeeDto, baseUrl: string): Promise<any> {
+  async create(data: CreateEmployeeDto): Promise<any> {
     const existing = await this.employeeModel.findOne({ email: data.email });
     if (existing) {
       throw new BadRequestException('Email already exists');
@@ -64,7 +49,7 @@ export class EmployeeService {
     });
 
     const savedEmployee = await employee.save();
-    return this.formatEmployee(savedEmployee, baseUrl);
+    return savedEmployee.toObject();
   }
 
   async getAllEmployees(baseUrl: string) {
@@ -72,7 +57,7 @@ export class EmployeeService {
     if (!employees.length) {
       throw new HttpException('No employees found', HttpStatus.NOT_FOUND);
     }
-    return employees.map(emp => this.formatEmployee(emp, baseUrl));
+    return employees.map(emp => emp.toObject());
   }
 
   async getEmployeeById(id: string, baseUrl: string) {
@@ -80,19 +65,19 @@ export class EmployeeService {
     if (!employee) {
       throw new HttpException('Employee not found', HttpStatus.NOT_FOUND);
     }
-    return this.formatEmployee(employee, baseUrl);
+    return employee.toObject();
   }
 
-  // NEW METHOD: Get employees by status
+  // Get employees by status
   async getEmployeesByStatus(status: string, baseUrl: string) {
     const employees = await this.employeeModel.find({ status }).exec();
-    
+
     if (!employees || employees.length === 0) {
       // Don't throw error, just return empty array for better UX
       return [];
     }
-    
-    return employees.map(emp => this.formatEmployee(emp, baseUrl));
+
+    return employees.map(emp => emp.toObject());
   }
 
   async acceptEmployee(id: string, baseUrl: string) {
@@ -118,7 +103,7 @@ export class EmployeeService {
       throw new HttpException('Failed to update employee', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    return this.formatEmployee(updated, baseUrl);
+    return updated.toObject();
   }
 
   async rejectEmployee(id: string, baseUrl: string) {
@@ -144,7 +129,7 @@ export class EmployeeService {
       throw new HttpException('Failed to update employee', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    return this.formatEmployee(updated, baseUrl);
+    return updated.toObject();
   }
 
   async updateEmployee(id: string, data: UpdateEmployeeDto, baseUrl: string) {
@@ -158,7 +143,7 @@ export class EmployeeService {
       throw new HttpException('Employee not found', HttpStatus.NOT_FOUND);
     }
 
-    return this.formatEmployee(updated, baseUrl);
+    return updated.toObject();
   }
 
   async removeEmployee(id: string) {

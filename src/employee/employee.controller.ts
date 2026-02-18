@@ -17,10 +17,14 @@ import type { Request } from 'express';
 import { EmployeeService } from './employee.service';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Controller('employee')
 export class EmployeeController {
-  constructor(private readonly employeeService: EmployeeService) {}
+  constructor(
+    private readonly employeeService: EmployeeService,
+    private readonly cloudinaryService: CloudinaryService,
+  ) { }
 
   @Post('/register')
   @UseInterceptors(FileInterceptor('photo'))
@@ -63,9 +67,10 @@ export class EmployeeController {
 
       console.log('✅ All validations passed');
 
-      // Get base URL for photo
-      const baseUrl = `${req.protocol}://${req.get('host')}`;
-      console.log('Base URL:', baseUrl);
+      // Upload photo to Cloudinary
+      console.log('Uploading photo to Cloudinary...');
+      const photoUrl = await this.cloudinaryService.uploadImage(photo, 'employee-photos');
+      console.log('✅ Photo uploaded to Cloudinary:', photoUrl);
 
       // Construct employee data
       const employeeData = {
@@ -73,7 +78,7 @@ export class EmployeeController {
         email: body.email,
         phoneNumber: body.phoneNumber,
         password: body.password,
-        photo: photo.filename,
+        photo: photoUrl,
         status: 'pending' as const,
       };
 
@@ -83,7 +88,7 @@ export class EmployeeController {
       });
 
       console.log('Calling employeeService.create()...');
-      const result = await this.employeeService.create(employeeData, baseUrl);
+      const result = await this.employeeService.create(employeeData);
       console.log('✅ Service returned successfully:', result);
 
       return {
@@ -103,9 +108,8 @@ export class EmployeeController {
   }
 
   @Post()
-  async create(@Body() data: CreateEmployeeDto, @Req() req: Request) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.create(data, baseUrl);
+  async create(@Body() data: CreateEmployeeDto) {
+    const result = await this.employeeService.create(data);
     return {
       statusCode: HttpStatus.CREATED,
       message: 'Employee created successfully',
@@ -140,7 +144,7 @@ export class EmployeeController {
     @Req() req: Request,
   ) {
     const baseUrl = `${req.protocol}://${req.get('host')}`;
-    
+
     const validStatuses = ['pending', 'accept', 'reject'];
     if (!validStatuses.includes(status)) {
       return {

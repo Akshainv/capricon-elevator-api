@@ -11,12 +11,14 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Employee, EmployeeDocument } from '../employee/schemas/employeeSchema';
 import * as bcrypt from 'bcrypt';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 
 @Injectable()
 export class ProfileSettingsService {
   constructor(
     @InjectModel(Employee.name) private readonly employeeModel: Model<EmployeeDocument>,
-  ) {}
+    private readonly cloudinaryService: CloudinaryService,
+  ) { }
 
   private validateUserId(userId: string) {
     if (!userId) throw new BadRequestException('User ID is required');
@@ -28,23 +30,12 @@ export class ProfileSettingsService {
     this.validateUserId(userId);
     const employee = await this.employeeModel.findById(userId).select('-password -__v');
     if (!employee) throw new NotFoundException('Employee not found');
-    
+
     const employeeObj = employee.toObject();
-    
-    // ✅ FIX: Properly map profileImage from either profileImage or photo field
-    let profileImageUrl = employeeObj.profileImage;
-    
-    // If profileImage doesn't exist but photo exists, construct URL from photo
-    if (!profileImageUrl && employeeObj.photo) {
-      // Check if photo is already a full URL
-      if (employeeObj.photo.startsWith('http')) {
-        profileImageUrl = employeeObj.photo;
-      } else {
-        // Construct full URL from filename
-        profileImageUrl = `http://localhost:3000/uploads/${employeeObj.photo}`;
-      }
-    }
-    
+
+    // Use profileImage or photo field (photo is now a full Cloudinary URL)
+    let profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+
     return {
       ...employeeObj,
       phone: employeeObj.phoneNumber,
@@ -56,7 +47,7 @@ export class ProfileSettingsService {
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     this.validateUserId(userId);
-    
+
     const updateData: any = { ...dto };
     if (dto.phone) {
       updateData.phoneNumber = dto.phone;
@@ -68,23 +59,16 @@ export class ProfileSettingsService {
     const updated = await this.employeeModel
       .findByIdAndUpdate(userId, updateData, { new: true, runValidators: true })
       .select('-password -__v');
-    
+
     if (!updated) throw new NotFoundException('Employee not found');
-    
+
     const employeeObj = updated.toObject();
-    
-    // ✅ FIX: Include profileImage in response
-    let profileImageUrl = employeeObj.profileImage;
-    if (!profileImageUrl && employeeObj.photo) {
-      if (employeeObj.photo.startsWith('http')) {
-        profileImageUrl = employeeObj.photo;
-      } else {
-        profileImageUrl = `http://localhost:3000/uploads/${employeeObj.photo}`;
-      }
-    }
-    
-    return { 
-      message: 'Profile updated successfully', 
+
+    // Use profileImage or photo field (photo is now a full Cloudinary URL)
+    let profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+
+    return {
+      message: 'Profile updated successfully',
       user: {
         ...employeeObj,
         phone: employeeObj.phoneNumber,
@@ -97,15 +81,15 @@ export class ProfileSettingsService {
 
   async updateNotificationSettings(userId: string, dto: UpdateSettingsDto) {
     this.validateUserId(userId);
-    
+
     const updated = await this.employeeModel.findByIdAndUpdate(
       userId,
       { notificationPreferences: dto },
       { new: true },
     );
-    
+
     if (!updated) throw new NotFoundException('Employee not found');
-    
+
     return {
       message: 'Notification preferences updated successfully',
       notificationPreferences: updated.notificationPreferences,
@@ -138,24 +122,25 @@ export class ProfileSettingsService {
 
   async uploadAvatar(userId: string, file: any, baseUrl: string) {
     this.validateUserId(userId);
-    
-    const avatarUrl = `${baseUrl}/uploads/${file.filename}`;
 
-    // ✅ FIX: Update both profileImage and photo fields
+    // Upload to Cloudinary
+    const avatarUrl = await this.cloudinaryService.uploadImage(file, 'employee-avatars');
+
+    // Update both profileImage and photo fields
     const updated = await this.employeeModel.findByIdAndUpdate(
       userId,
-      { 
-        profileImage: avatarUrl, 
-        photo: file.filename 
+      {
+        profileImage: avatarUrl,
+        photo: avatarUrl
       },
       { new: true },
     );
-    
+
     if (!updated) throw new NotFoundException('Employee not found');
 
-    return { 
-      message: 'Avatar uploaded successfully', 
-      profileImage: avatarUrl 
+    return {
+      message: 'Avatar uploaded successfully',
+      profileImage: avatarUrl
     };
   }
 }

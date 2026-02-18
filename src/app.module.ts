@@ -20,6 +20,7 @@ import { PerformanceModule } from './performance/performance.module';
 import { ProfileSettingsModule } from './profile-settings/profile-settings.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { FacebookModule } from './facebook/facebook.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module';
 
 
 import config from './config/config';
@@ -66,6 +67,7 @@ import config from './config/config';
     ProfileSettingsModule,
     WebhooksModule,
     FacebookModule,
+    CloudinaryModule,
   ],
   controllers: [AppController],
   providers: [AppService],
