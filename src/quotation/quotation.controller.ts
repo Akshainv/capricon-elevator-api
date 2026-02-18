@@ -31,27 +31,41 @@ export class QuotationController {
   async create(
     @Body() createQuotationDto: CreateQuotationDto,
     @Req() req: Request,
-    @Headers('x-user-id') customUserId?: string,
   ) {
     try {
-      // 1. Try to get from req.user (populated by guards if present)
-      let userId = (req as any).user?.sub || customUserId;
+      // Robust Identity Extraction
+      let userId: string | undefined;
 
-      // 2. Try to decode from Authorization header (standard)
+      // 1. Try req.user (guards)
+      const reqUser = (req as any).user;
+      if (reqUser) {
+        userId = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+      }
+
+      // 2. Try Authorization Header
       if (!userId) {
-        const authHeader = req.headers['authorization'];
-        if (authHeader && authHeader.startsWith('Bearer ')) {
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+        if (authHeader && authHeader.toString().startsWith('Bearer ')) {
           try {
-            const token = authHeader.split(' ')[1];
-            const payload = this.jwtService.decode(token) as any;
-            if (payload && payload.sub) userId = payload.sub;
+            const token = authHeader.toString().split(' ')[1];
+            if (token && token !== 'null' && token !== 'undefined') {
+              const payload = this.jwtService.decode(token) as any;
+              if (payload) {
+                userId = payload.sub || payload.userId || payload._id || payload.id;
+              }
+            }
           } catch (e) {
-            console.error('Failed to decode token in create quotation:', e);
+            console.error('❌ Failed to decode token in QuotationController.create:', e);
           }
         }
       }
 
-      console.log('📝 Creating quotation with userId:', userId);
+      // 3. Fallback Header (deprecated)
+      if (!userId) {
+        userId = req.headers['x-user-id'] as string;
+      }
+
+      console.log('📝 Creating quotation with userId:', userId || 'system');
       const creatorId = userId || 'system';
       const result = await this.quotationService.create(createQuotationDto, creatorId);
       return {
@@ -70,30 +84,41 @@ export class QuotationController {
     @Req() req: Request,
     @Query('status') status?: string,
     @Query('search') search?: string,
-    @Headers('x-user-id') customUserId?: string,
-    @Headers('x-user-role') customUserRole?: string,
   ) {
     try {
-      // 1. Try to get from req.user
-      let userId = (req as any).user?.sub || customUserId;
-      let userRole = (req as any).user?.role || customUserRole;
+      // Robust Identity Extraction
+      let userId: string | undefined;
+      let userRole: string | undefined;
 
-      // 2. Try to decode from Authorization header (standard)
+      // 1. Try req.user (guards)
+      const reqUser = (req as any).user;
+      if (reqUser) {
+        userId = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+        userRole = reqUser.role;
+      }
+
+      // 2. Try Authorization Header
       if (!userId || !userRole) {
-        const authHeader = req.headers['authorization'];
-        if (authHeader && authHeader.startsWith('Bearer ')) {
+        const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+        if (authHeader && authHeader.toString().startsWith('Bearer ')) {
           try {
-            const token = authHeader.split(' ')[1];
-            const payload = this.jwtService.decode(token) as any;
-            if (payload) {
-              if (payload.sub) userId = payload.sub;
-              if (payload.role) userRole = payload.role;
+            const token = authHeader.toString().split(' ')[1];
+            if (token && token !== 'null' && token !== 'undefined') {
+              const payload = this.jwtService.decode(token) as any;
+              if (payload) {
+                userId = userId || payload.sub || payload.userId || payload._id || payload.id;
+                userRole = userRole || payload.role;
+              }
             }
           } catch (e) {
-            console.error('Failed to decode token in findAll quotation:', e);
+            console.error('❌ Failed to decode token in QuotationController.findAll:', e);
           }
         }
       }
+
+      // 3. Fallback Headers (deprecated)
+      userId = userId || (req.headers['x-user-id'] as string);
+      userRole = userRole || (req.headers['x-user-role'] as string);
 
       console.log('🔍 Fetching quotations for userId:', userId, 'role:', userRole);
       const createdBy = (userRole === 'employee' && userId) ? userId : undefined;
