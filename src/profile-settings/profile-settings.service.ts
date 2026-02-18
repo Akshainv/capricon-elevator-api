@@ -44,7 +44,7 @@ export class ProfileSettingsService {
     }
 
     if (profileImageUrl && !profileImageUrl.startsWith('http')) {
-      profileImageUrl = `${baseUrl}/${profileImageUrl}`;
+      profileImageUrl = `${baseUrl}/uploads/${profileImageUrl}`;
     }
 
     return {

@@ -60,10 +60,10 @@ export class EmployeeService {
     return employees.map(emp => {
       const obj = emp.toObject();
       if (obj.photo && !obj.photo.startsWith('http')) {
-        obj.photo = `${baseUrl}/${obj.photo}`;
+        obj.photo = `${baseUrl}/uploads/${obj.photo}`;
       }
       if (obj.profileImage && !obj.profileImage.startsWith('http')) {
-        obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+        obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
       }
       return obj;
     });
@@ -76,10 +76,10 @@ export class EmployeeService {
     }
     const obj = employee.toObject();
     if (obj.photo && !obj.photo.startsWith('http')) {
-      obj.photo = `${baseUrl}/${obj.photo}`;
+      obj.photo = `${baseUrl}/uploads/${obj.photo}`;
     }
     if (obj.profileImage && !obj.profileImage.startsWith('http')) {
-      obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+      obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
     }
     return obj;
   }
@@ -96,10 +96,10 @@ export class EmployeeService {
     return employees.map(emp => {
       const obj = emp.toObject();
       if (obj.photo && !obj.photo.startsWith('http')) {
-        obj.photo = `${baseUrl}/${obj.photo}`;
+        obj.photo = `${baseUrl}/uploads/${obj.photo}`;
       }
       if (obj.profileImage && !obj.profileImage.startsWith('http')) {
-        obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+        obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
       }
       return obj;
     });
@@ -128,7 +128,14 @@ export class EmployeeService {
       throw new HttpException('Failed to update employee', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    return updated.toObject();
+    const obj = updated.toObject();
+    if (obj.photo && !obj.photo.startsWith('http')) {
+      obj.photo = `${baseUrl}/uploads/${obj.photo}`;
+    }
+    if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+      obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
+    }
+    return obj;
   }
 
   async rejectEmployee(id: string, baseUrl: string) {
@@ -154,7 +161,14 @@ export class EmployeeService {
       throw new HttpException('Failed to update employee', HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    return updated.toObject();
+    const obj = updated.toObject();
+    if (obj.photo && !obj.photo.startsWith('http')) {
+      obj.photo = `${baseUrl}/uploads/${obj.photo}`;
+    }
+    if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+      obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
+    }
+    return obj;
   }
 
   async updateEmployee(id: string, data: UpdateEmployeeDto, baseUrl: string) {
@@ -170,10 +184,10 @@ export class EmployeeService {
 
     const obj = updated.toObject();
     if (obj.photo && !obj.photo.startsWith('http')) {
-      obj.photo = `${baseUrl}/${obj.photo}`;
+      obj.photo = `${baseUrl}/uploads/${obj.photo}`;
     }
     if (obj.profileImage && !obj.profileImage.startsWith('http')) {
-      obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+      obj.profileImage = `${baseUrl}/uploads/${obj.profileImage}`;
     }
     return obj;
   }
