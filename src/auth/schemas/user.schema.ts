@@ -14,6 +14,18 @@ export class User {
 
   @Prop({ enum: ['admin'], required: true })
   role: string;
+
+  @Prop()
+  facebookConnected: boolean;
+
+  @Prop()
+  facebookAccessToken: string;
+
+  @Prop()
+  facebookPageId: string;
+
+  @Prop()
+  facebookPageName: string;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

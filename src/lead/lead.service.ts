@@ -109,7 +109,12 @@ export class LeadService {
   async getAllLeads() {
     const leads = await this.LeadModel.find().exec();
     if (!leads || leads.length === 0) {
-      throw new HttpException('No leads found', HttpStatus.NOT_FOUND);
+      console.log('[DEBUG] getAllLeads: No leads found. Returning empty list.');
+      return {
+        message: 'No leads found',
+        count: 0,
+        data: [],
+      };
     }
 
     console.log(`[DEBUG] getAllLeads: Found ${leads.length} leads. Resolving creator names...`);
@@ -137,15 +142,31 @@ export class LeadService {
   }
 
   async getLeadsCreatedBy(userId: string) {
-    const leads = await this.LeadModel.find({
-      createdBy: userId,
+    console.log(`[DEBUG] getLeadsCreatedBy: Resolving identifiers for ${userId}`);
+
+    // Resolve email for the given userId to support email-based queries
+    let userEmail = '';
+    const employee = await this.employeeModel.findById(userId).exec();
+    if (employee) {
+      userEmail = employee.email;
+    } else {
+      const user = await this.userModel.findById(userId).exec();
+      if (user) userEmail = user.email;
+    }
+
+    const query: any = {
+      $or: [
+        { createdBy: userId },
+        { createdBy: userEmail }
+      ],
       $and: [
         {
           $or: [
             { assignedTo: { $exists: false } },
             { assignedTo: null },
             { assignedTo: '' },
-            { assignedTo: userId }
+            { assignedTo: userId },
+            { assignedTo: userEmail }
           ]
         },
         {
@@ -155,7 +176,10 @@ export class LeadService {
           ]
         }
       ]
-    }).exec();
+    };
+
+    console.log(`[DEBUG] getLeadsCreatedBy Query:`, JSON.stringify(query));
+    const leads = await this.LeadModel.find(query).exec();
 
     const enrichedLeads = await Promise.all(leads.map(lead => this.enrichLeadWithCreator(lead)));
 
@@ -167,14 +191,38 @@ export class LeadService {
   }
 
   async getLeadsAssignedToButNotCreatedBy(userId: string) {
-    const leads = await this.LeadModel.find({
-      assignedTo: userId,
-      createdBy: { $ne: userId },
-      $or: [
-        { isConverted: { $exists: false } },
-        { isConverted: false }
+    console.log(`[DEBUG] getLeadsAssignedToButNotCreatedBy: Resolving identifiers for ${userId}`);
+
+    // Resolve email for the given userId
+    let userEmail = '';
+    const employee = await this.employeeModel.findById(userId).exec();
+    if (employee) {
+      userEmail = employee.email;
+    } else {
+      const user = await this.userModel.findById(userId).exec();
+      if (user) userEmail = user.email;
+    }
+
+    const query: any = {
+      $and: [
+        {
+          $or: [
+            { assignedTo: userId },
+            { assignedTo: userEmail }
+          ]
+        },
+        { createdBy: { $nin: [userId, userEmail] } },
+        {
+          $or: [
+            { isConverted: { $exists: false } },
+            { isConverted: false }
+          ]
+        }
       ]
-    }).exec();
+    };
+
+    console.log(`[DEBUG] getLeadsAssignedToQuery Query:`, JSON.stringify(query));
+    const leads = await this.LeadModel.find(query).exec();
 
     console.log(`Backend: Found ${leads.length} leads assigned to user ${userId}`);
     leads.forEach(lead => {

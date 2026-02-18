@@ -25,9 +25,12 @@ async function bootstrap() {
       'http://localhost:3000',
       /^http:\/\/localhost:\d+$/,
       'https://capricon-elevator.vercel.app',
-      'https://capricon-new.vercel.app'
+      'https://capricon-new.vercel.app',
+      'https://capricon-crm-new.vercel.app'
     ],
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With, x-user-id, x-user-role',
   });
 
   // Serve static files from uploads folder

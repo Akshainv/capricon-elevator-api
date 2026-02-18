@@ -94,15 +94,33 @@ export class QuotationService {
   async findAll(status?: string, search?: string, createdBy?: string) {
     const query: any = {};
     if (status) query.status = status;
-    if (createdBy) query.createdBy = createdBy;
+
+    const conditions: any[] = [];
+
+    if (createdBy) {
+      conditions.push({
+        $or: [
+          { createdBy: createdBy },
+          { createdBy: { $exists: false } },
+          { createdBy: null },
+          { createdBy: '' }
+        ]
+      });
+    }
 
     if (search) {
-      query.$or = [
-        { customerName: new RegExp(search, 'i') },
-        { customerEmail: new RegExp(search, 'i') },
-        { quoteNumber: new RegExp(search, 'i') },
-        { companyName: new RegExp(search, 'i') },
-      ];
+      conditions.push({
+        $or: [
+          { customerName: new RegExp(search, 'i') },
+          { customerEmail: new RegExp(search, 'i') },
+          { quoteNumber: new RegExp(search, 'i') },
+          { companyName: new RegExp(search, 'i') },
+        ]
+      });
+    }
+
+    if (conditions.length > 0) {
+      query.$and = conditions;
     }
 
     return await this.quotationModel
@@ -246,33 +264,56 @@ export class QuotationService {
   }
 
   async sendQuotationWithPDF(id: string, email: string, quotationData: any) {
-    const quotation = await this.findOne(id);
+    const q = (await this.findOne(id)) as any;
+    const recipientEmail = email || q.customerEmail || (q.customer && q.customer.email);
+
+    if (!recipientEmail) {
+      throw new HttpException('Recipient email missing', HttpStatus.BAD_REQUEST);
+    }
+
+    // ✅ Add Email Verification before sending
+    const verification = await this.verifyEmail(recipientEmail);
+    if (!verification.valid) {
+      throw new HttpException(
+        verification.error || 'Invalid email address or domain',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     try {
       const pdfBuffer = await this.generateQuotationPDF(quotationData);
-      const fromAddress = process.env.EMAIL_USER || process.env.SMTP_USER || 'noreply@capricornelevators.com';
-      const q = quotation as any;
-      const recipientEmail = email || q.customerEmail || (q.customer && q.customer.email);
-
-      if (!recipientEmail) throw new HttpException('Recipient email missing', HttpStatus.BAD_REQUEST);
+      const fromAddress =
+        process.env.EMAIL_USER ||
+        process.env.SMTP_USER ||
+        'noreply@capricornelevators.com';
 
       const mailOptions = {
         from: `Capricorn Elevators <${fromAddress}>`,
         to: recipientEmail,
-        subject: `Quotation ${quotation.quoteNumber} from Capricorn Elevators`,
+        subject: `Quotation ${q.quoteNumber} from Capricorn Elevators`,
         html: this.generateEmailBody(quotationData),
-        attachments: [{
-          filename: `Quotation_${quotation.quoteNumber}.pdf`,
-          content: pdfBuffer,
-          contentType: 'application/pdf'
-        }]
+        attachments: [
+          {
+            filename: `Quotation_${q.quoteNumber}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
       };
 
       const info = await this.transporter.sendMail(mailOptions);
       await this.updateStatus(id, 'sent');
-      return { message: 'Quotation sent successfully', quotation, messageId: info?.messageId };
+      return {
+        message: 'Quotation sent successfully',
+        quotation: q,
+        messageId: info?.messageId,
+      };
     } catch (error: any) {
       console.error('❌ Email error:', error);
-      throw new HttpException('Failed to send email: ' + error.message, HttpStatus.INTERNAL_SERVER_ERROR);
+      throw new HttpException(
+        'Failed to send email: ' + error.message,
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 

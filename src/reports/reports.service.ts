@@ -26,7 +26,8 @@ export class ReportsService {
     @InjectModel('Quotation') private readonly quotationModel: Model<any>,
     @InjectModel('Project') private readonly projectModel: Model<any>,
     @InjectModel('Employee') private readonly employeeModel: Model<any>,
-  ) {}
+    @InjectModel('Lead') private readonly leadModel: Model<any>,
+  ) { }
 
   private buildDateFilter(filters?: ReportFilterDto): any {
     const filter: any = {};
@@ -38,23 +39,35 @@ export class ReportsService {
     return filter;
   }
 
-  private addOptionalFilters(base: any, filters: ReportFilterDto) {
-    if (filters.employeeId) base.assignedTo = filters.employeeId;
-    if (filters.dealStage) base.DealStatus = filters.dealStage;
+  private addOptionalFilters(base: any, filters: ReportFilterDto, modelType: 'project' | 'quotation' | 'deal' | 'lead' = 'project') {
+    if (filters.employeeId) {
+      if (modelType === 'quotation') {
+        base.createdBy = filters.employeeId;
+      } else if (modelType === 'lead') {
+        // Leads use both assignedTo and createdBy
+        // Note: For simplicity in aggregation, we use $or if possible, 
+        // but here base is a simple object. For leads we'll handle this in the service.
+        base.employeeId = filters.employeeId; // Marker for manual handling
+      } else {
+        // For projects and deals, check assignedTo primarily
+        base.assignedTo = filters.employeeId;
+      }
+    }
+    if (filters.dealStage && modelType === 'deal') base.DealStatus = filters.dealStage;
     return base;
   }
 
   // ✅ NEW: Dedicated method for fetching top performers
   async getTopPerformers(filters?: ReportFilterDto, limit: number = 10): Promise<TopPerformer[]> {
     const dateFilter = this.buildDateFilter(filters);
-    
+
     const topPerformersAgg = await this.projectModel.aggregate([
-      { 
-        $match: { 
-          projectStatus: 'completed', 
+      {
+        $match: {
+          projectStatus: 'completed',
           ...dateFilter,
           assignedTo: { $exists: true, $ne: null }
-        } 
+        }
       },
       {
         $group: {
@@ -70,22 +83,22 @@ export class ReportsService {
     const topPerformers: TopPerformer[] = await Promise.all(
       topPerformersAgg.map(async (p) => {
         let employeeName = 'Unknown Employee';
-        
+
         try {
           let employee = await this.employeeModel.findById(p._id).exec();
-          
+
           if (!employee) {
             employee = await this.employeeModel.findOne({ employeeId: p._id }).exec();
           }
-          
+
           if (!employee && typeof p._id === 'string' && p._id.includes('@')) {
             employee = await this.employeeModel.findOne({ email: p._id }).exec();
           }
-          
+
           if (!employee) {
             employee = await this.employeeModel.findOne({ username: p._id }).exec();
           }
-          
+
           if (employee) {
             employeeName = employee.fullName || employee.name || employee.email || employee.username || 'Unknown Employee';
           }
@@ -104,21 +117,26 @@ export class ReportsService {
     return topPerformers;
   }
 
-  async getGeneralSummary(): Promise<ReportSummaryResponse> {
-    const dateFilter = this.buildDateFilter();
+  async getGeneralSummary(filters: ReportFilterDto = {}): Promise<ReportSummaryResponse> {
+    const dateFilter = this.buildDateFilter(filters);
+
+    // Model-specific filters
+    const projectFilter = this.addOptionalFilters({ ...dateFilter }, filters, 'project');
+    const quotationFilter = this.addOptionalFilters({ ...dateFilter }, filters, 'quotation');
+    const dealFilter = this.addOptionalFilters({ ...dateFilter }, filters, 'deal');
 
     // Total projects count
-    const totalProjects = await this.projectModel.countDocuments(dateFilter);
+    const totalProjects = await this.projectModel.countDocuments(projectFilter);
 
     // Completed projects count
     const projectsWon = await this.projectModel.countDocuments({
+      ...projectFilter,
       projectStatus: 'completed',
-      ...dateFilter,
     });
 
     // Total revenue from completed projects
     const revenueAgg = await this.projectModel.aggregate([
-      { $match: { projectStatus: 'completed', ...dateFilter } },
+      { $match: { ...projectFilter, projectStatus: 'completed' } },
       {
         $group: {
           _id: null,
@@ -129,25 +147,47 @@ export class ReportsService {
 
     const totalRevenue = revenueAgg[0]?.totalRevenue || 0;
 
+    // Total Leads count
+    // Handle salesperson filtering for leads (AssignedTo OR CreatedBy)
+    let leadFilter: any = { ...dateFilter };
+    if (filters.employeeId) {
+      // Resolve identifiers for robust matching
+      let userEmail = '';
+      try {
+        const emp = await this.employeeModel.findById(filters.employeeId).exec();
+        if (emp) userEmail = emp.email;
+      } catch (e) { }
+
+      leadFilter = {
+        ...dateFilter,
+        $or: [
+          { assignedTo: filters.employeeId },
+          { createdBy: filters.employeeId },
+          { assignedTo: userEmail },
+          { createdBy: userEmail }
+        ]
+      };
+    }
+    const leadsCount = await this.leadModel.countDocuments(leadFilter);
+
     // Quotations
     const quotationsSent = await this.quotationModel.countDocuments({
+      ...quotationFilter,
       status: 'sent',
-      ...dateFilter,
     });
     const quotationsAccepted = await this.quotationModel.countDocuments({
+      ...quotationFilter,
       status: 'accepted',
-      ...dateFilter,
     });
 
-    // ✅ UPDATED: Pipeline stages from DEALS collection
+    // Pipeline stages from DEALS collection
     const pipeline = await Promise.all(
       this.dealStages.map(async (stage) => {
-        const count = await this.dealModel.countDocuments({
-          DealStatus: stage,
-          ...dateFilter,
-        });
+        const stageMatch = { ...dealFilter, DealStatus: stage };
+
+        const count = await this.dealModel.countDocuments(stageMatch);
         const valueAgg = await this.dealModel.aggregate([
-          { $match: { DealStatus: stage, ...dateFilter } },
+          { $match: stageMatch },
           { $group: { _id: null, total: { $sum: '$dealAmount' } } },
         ]);
         return {
@@ -158,8 +198,8 @@ export class ReportsService {
       }),
     );
 
-    // ✅ CHANGED: Use dedicated method for top performers
-    const topPerformers = await this.getTopPerformers(undefined, 10);
+    // Use dedicated method for top performers
+    const topPerformers = await this.getTopPerformers(filters, 10);
 
     const conversionRate = totalProjects > 0 ? Math.round((projectsWon / totalProjects) * 100) : 0;
     const avgDealSize = projectsWon > 0 ? Math.round(totalRevenue / projectsWon) : 0;
@@ -174,6 +214,7 @@ export class ReportsService {
       quotationsAccepted,
       conversionRate,
       avgDealSize,
+      leadsCount,
       pipeline,
       topPerformers,
     };
@@ -213,6 +254,27 @@ export class ReportsService {
       status: 'accepted',
     });
 
+    // Leads count for custom report
+    let leadFilter: any = { ...dateFilter };
+    if (filters.employeeId) {
+      let userEmail = '';
+      try {
+        const emp = await this.employeeModel.findById(filters.employeeId).exec();
+        if (emp) userEmail = emp.email;
+      } catch (e) { }
+
+      leadFilter = {
+        ...dateFilter,
+        $or: [
+          { assignedTo: filters.employeeId },
+          { createdBy: filters.employeeId },
+          { assignedTo: userEmail },
+          { createdBy: userEmail }
+        ]
+      };
+    }
+    const leadsCount = await this.leadModel.countDocuments(leadFilter);
+
     // ✅ UPDATED: Pipeline from DEALS collection
     const pipeline = await Promise.all(
       this.dealStages.map(async (stage) => {
@@ -242,6 +304,7 @@ export class ReportsService {
         totalQuotations,
         quotationsAccepted,
         conversionRate,
+        leadsCount,
       },
       pipeline,
       topPerformers,

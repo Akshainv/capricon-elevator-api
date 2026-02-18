@@ -14,11 +14,16 @@ import type { Response } from 'express';
 
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(private readonly reportsService: ReportsService) { }
 
   @Get('summary')
-  async getSummary(): Promise<ReportSummaryResponse> {
-    return this.reportsService.getGeneralSummary();
+  async getSummary(@Query() filters: ReportFilterDto) {
+    const result = await this.reportsService.getGeneralSummary(filters);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Summary report fetched successfully',
+      data: result,
+    };
   }
 
   @Post('custom')
@@ -35,10 +40,10 @@ export class ReportsController {
     const filters: ReportFilterDto = {};
     if (startDate) filters.startDate = startDate;
     if (endDate) filters.endDate = endDate;
-    
+
     const limitNum = limit ? parseInt(limit, 10) : 10;
     const topPerformers = await this.reportsService.getTopPerformers(filters, limitNum);
-    
+
     return {
       success: true,
       data: topPerformers,

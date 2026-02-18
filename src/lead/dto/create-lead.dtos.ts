@@ -40,4 +40,9 @@ export class CreateLeadDto {
     @IsNotEmpty()
     @IsString()
     createdBy: string
+
+    @IsOptional()
+    @IsString()
+    @IsEnum(['low', 'medium', 'high'])
+    priority?: string
 }

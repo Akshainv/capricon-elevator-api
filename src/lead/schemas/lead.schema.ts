@@ -79,6 +79,15 @@ export class Lead {
 
   @Prop()
   updatedAt?: Date;
+
+  @Prop({ default: false })
+  isFacebookLead: boolean;
+
+  @Prop()
+  facebookLeadId: string;
+
+  @Prop()
+  facebookFormId: string;
 }
 
 export const LeadSchema = SchemaFactory.createForClass(Lead);

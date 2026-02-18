@@ -46,6 +46,7 @@ export interface ReportSummaryResponse {
   quotationsAccepted: number;
   conversionRate: number;
   avgDealSize: number;
+  leadsCount: number;
   pipeline: PipelineStage[];
   topPerformers: TopPerformer[];
 }
@@ -62,6 +63,7 @@ export interface CustomReportResponse {
     totalQuotations: number;
     quotationsAccepted: number;
     conversionRate: number;
+    leadsCount: number;
   };
   pipeline: PipelineStage[];
   topPerformers: TopPerformer[];

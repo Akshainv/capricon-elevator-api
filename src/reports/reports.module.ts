@@ -7,6 +7,7 @@ import { DealSchema } from '../deal/schemas/deal.schema';
 import { QuotationSchema } from '../quotation/schemas/quotation.schema';
 import { ProjectSchema } from '../projects/schemas/project.schema';
 import { EmployeeSchema } from '../employee/schemas/employeeSchema';
+import { LeadSchema } from '../lead/schemas/lead.schema';
 
 @Module({
   imports: [
@@ -15,10 +16,11 @@ import { EmployeeSchema } from '../employee/schemas/employeeSchema';
       { name: 'Quotation', schema: QuotationSchema },
       { name: 'Project', schema: ProjectSchema },
       { name: 'Employee', schema: EmployeeSchema },
+      { name: 'Lead', schema: LeadSchema },
     ]),
   ],
   controllers: [ReportsController],
   providers: [ReportsService],
   exports: [ReportsService],
 })
-export class ReportsModule {}
+export class ReportsModule { }

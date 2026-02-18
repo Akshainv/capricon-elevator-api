@@ -19,6 +19,7 @@ import { ReportsModule } from './reports/reports.module'; // ← ADD THIS LINE
 import { PerformanceModule } from './performance/performance.module';
 import { ProfileSettingsModule } from './profile-settings/profile-settings.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { FacebookModule } from './facebook/facebook.module';
 
 
 import config from './config/config';
@@ -64,7 +65,7 @@ import config from './config/config';
     PerformanceModule,
     ProfileSettingsModule,
     WebhooksModule,
-    // ← ADD THIS LINE
+    FacebookModule,
   ],
   controllers: [AppController],
   providers: [AppService],

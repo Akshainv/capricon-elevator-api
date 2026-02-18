@@ -42,7 +42,7 @@ export class Quotation {
   companyName: string;
 
   @Prop({
-    default: 'sent',
+    default: 'draft',
     enum: ['draft', 'sent', 'approved', 'rejected'],
   })
   status: string;

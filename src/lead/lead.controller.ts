@@ -78,7 +78,7 @@ export class LeadController {
   }
 
   // ====================== SPECIFIC ROUTES (BEFORE :id) ======================
-  
+
   @Get('created-by/:userId')
   async getLeadsCreatedBy(@Param('userId') userId: string) {
     try {
@@ -158,7 +158,7 @@ export class LeadController {
   }
 
   // ====================== GENERIC :id ROUTES (MUST BE LAST) ======================
-  
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     try {
