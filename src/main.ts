@@ -33,7 +33,16 @@ async function bootstrap() {
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    allowedHeaders: 'Content-Type, Accept, Authorization, X-Requested-With, x-user-id, x-user-role',
+    allowedHeaders: [
+      'Content-Type',
+      'Accept',
+      'Authorization',
+      'X-Requested-With',
+      'x-user-id',
+      'x-user-role',
+      'X-User-Id',
+      'X-User-Role'
+    ],
   });
 
   // Serve static files from uploads folder
