@@ -44,14 +44,17 @@ export class ProfileSettingsController {
 
   @Get('me')
   getProfile(@Req() req: any) {
-    return this.profileSettingsService.getProfile(this.getUserId(req));
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    return this.profileSettingsService.getProfile(this.getUserId(req), baseUrl);
   }
 
   @Patch('profile')
   updateProfile(@Req() req: any, @Body() dto: UpdateProfileDto) {
+    const baseUrl = `${req.protocol}://${req.get('host')}`;
     return this.profileSettingsService.updateProfile(
       this.getUserId(req),
       dto,
+      baseUrl,
     );
   }
 

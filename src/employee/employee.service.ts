@@ -57,7 +57,16 @@ export class EmployeeService {
     if (!employees.length) {
       throw new HttpException('No employees found', HttpStatus.NOT_FOUND);
     }
-    return employees.map(emp => emp.toObject());
+    return employees.map(emp => {
+      const obj = emp.toObject();
+      if (obj.photo && !obj.photo.startsWith('http')) {
+        obj.photo = `${baseUrl}/${obj.photo}`;
+      }
+      if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+        obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+      }
+      return obj;
+    });
   }
 
   async getEmployeeById(id: string, baseUrl: string) {
@@ -65,7 +74,14 @@ export class EmployeeService {
     if (!employee) {
       throw new HttpException('Employee not found', HttpStatus.NOT_FOUND);
     }
-    return employee.toObject();
+    const obj = employee.toObject();
+    if (obj.photo && !obj.photo.startsWith('http')) {
+      obj.photo = `${baseUrl}/${obj.photo}`;
+    }
+    if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+      obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+    }
+    return obj;
   }
 
   // Get employees by status
@@ -77,7 +93,16 @@ export class EmployeeService {
       return [];
     }
 
-    return employees.map(emp => emp.toObject());
+    return employees.map(emp => {
+      const obj = emp.toObject();
+      if (obj.photo && !obj.photo.startsWith('http')) {
+        obj.photo = `${baseUrl}/${obj.photo}`;
+      }
+      if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+        obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+      }
+      return obj;
+    });
   }
 
   async acceptEmployee(id: string, baseUrl: string) {
@@ -143,7 +168,14 @@ export class EmployeeService {
       throw new HttpException('Employee not found', HttpStatus.NOT_FOUND);
     }
 
-    return updated.toObject();
+    const obj = updated.toObject();
+    if (obj.photo && !obj.photo.startsWith('http')) {
+      obj.photo = `${baseUrl}/${obj.photo}`;
+    }
+    if (obj.profileImage && !obj.profileImage.startsWith('http')) {
+      obj.profileImage = `${baseUrl}/${obj.profileImage}`;
+    }
+    return obj;
   }
 
   async removeEmployee(id: string) {

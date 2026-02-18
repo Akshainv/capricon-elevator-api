@@ -26,15 +26,26 @@ export class ProfileSettingsService {
       throw new BadRequestException('Invalid user ID');
   }
 
-  async getProfile(userId: string) {
+  async getProfile(userId: string, baseUrl: string) {
     this.validateUserId(userId);
     const employee = await this.employeeModel.findById(userId).select('-password -__v');
     if (!employee) throw new NotFoundException('Employee not found');
 
     const employeeObj = employee.toObject();
 
-    // Use profileImage or photo field (photo is now a full Cloudinary URL)
-    let profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+    // Use profileImage or photo field
+    // PRIORITIZE CLOUDINARY URL: If photo is a URL (starts with http), use it preferentially
+    let profileImageUrl = employeeObj.profileImage;
+
+    if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
+      profileImageUrl = employeeObj.photo;
+    } else {
+      profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+    }
+
+    if (profileImageUrl && !profileImageUrl.startsWith('http')) {
+      profileImageUrl = `${baseUrl}/${profileImageUrl}`;
+    }
 
     return {
       ...employeeObj,
@@ -45,7 +56,7 @@ export class ProfileSettingsService {
     };
   }
 
-  async updateProfile(userId: string, dto: UpdateProfileDto) {
+  async updateProfile(userId: string, dto: UpdateProfileDto, baseUrl: string) {
     this.validateUserId(userId);
 
     const updateData: any = { ...dto };
@@ -64,8 +75,19 @@ export class ProfileSettingsService {
 
     const employeeObj = updated.toObject();
 
-    // Use profileImage or photo field (photo is now a full Cloudinary URL)
-    let profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+    // Use profileImage or photo field
+    // PRIORITIZE CLOUDINARY URL: If photo is a URL (starts with http), use it preferentially
+    let profileImageUrl = employeeObj.profileImage;
+
+    if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
+      profileImageUrl = employeeObj.photo;
+    } else {
+      profileImageUrl = employeeObj.profileImage || employeeObj.photo || null;
+    }
+
+    if (profileImageUrl && !profileImageUrl.startsWith('http')) {
+      profileImageUrl = `${baseUrl}/${profileImageUrl}`;
+    }
 
     return {
       message: 'Profile updated successfully',
