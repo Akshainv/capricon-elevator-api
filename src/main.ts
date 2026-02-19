@@ -27,6 +27,8 @@ async function bootstrap() {
   app.enableCors({
     origin: true,
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
   // Serve static files from uploads folder
