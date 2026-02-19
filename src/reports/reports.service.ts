@@ -246,6 +246,9 @@ export class ReportsService {
 
     // Quotations
     const quotationFilter: any = { ...dateFilter };
+    if (filters.employeeId) {
+      quotationFilter.createdBy = filters.employeeId;
+    }
     if (filters.quotationStatus) quotationFilter.status = filters.quotationStatus;
 
     const totalQuotations = await this.quotationModel.countDocuments(quotationFilter);
