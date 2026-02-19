@@ -118,9 +118,8 @@ export class EmployeeController {
   }
 
   @Get()
-  async findAll(@Req() req: Request) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.getAllEmployees(baseUrl);
+  async findAll() {
+    const result = await this.employeeService.getAllEmployees();
     return {
       statusCode: HttpStatus.OK,
       message: 'All employees fetched successfully',
@@ -139,12 +138,7 @@ export class EmployeeController {
   }
 
   @Get('/status/:status')
-  async getEmployeesByStatus(
-    @Param('status') status: string,
-    @Req() req: Request,
-  ) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-
+  async getEmployeesByStatus(@Param('status') status: string) {
     const validStatuses = ['pending', 'accept', 'reject'];
     if (!validStatuses.includes(status)) {
       return {
@@ -154,7 +148,7 @@ export class EmployeeController {
       };
     }
 
-    const result = await this.employeeService.getEmployeesByStatus(status, baseUrl);
+    const result = await this.employeeService.getEmployeesByStatus(status);
     return {
       statusCode: HttpStatus.OK,
       message: `Employees with status '${status}' fetched successfully`,
@@ -163,9 +157,8 @@ export class EmployeeController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @Req() req: Request) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.getEmployeeById(id, baseUrl);
+  async findOne(@Param('id') id: string) {
+    const result = await this.employeeService.getEmployeeById(id);
     return {
       statusCode: HttpStatus.OK,
       message: 'Employee fetched successfully',
@@ -174,9 +167,8 @@ export class EmployeeController {
   }
 
   @Patch('/accept/:id')
-  async acceptEmployee(@Param('id') id: string, @Req() req: Request) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.acceptEmployee(id, baseUrl);
+  async acceptEmployee(@Param('id') id: string) {
+    const result = await this.employeeService.acceptEmployee(id);
     return {
       statusCode: HttpStatus.OK,
       message: 'Employee accepted successfully',
@@ -185,9 +177,8 @@ export class EmployeeController {
   }
 
   @Patch('/reject/:id')
-  async rejectEmployee(@Param('id') id: string, @Req() req: Request) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.rejectEmployee(id, baseUrl);
+  async rejectEmployee(@Param('id') id: string) {
+    const result = await this.employeeService.rejectEmployee(id);
     return {
       statusCode: HttpStatus.OK,
       message: 'Employee rejected successfully',
@@ -199,10 +190,8 @@ export class EmployeeController {
   async updateEmployee(
     @Param('id') id: string,
     @Body() data: UpdateEmployeeDto,
-    @Req() req: Request,
   ) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    const result = await this.employeeService.updateEmployee(id, data, baseUrl);
+    const result = await this.employeeService.updateEmployee(id, data);
     return {
       statusCode: HttpStatus.OK,
       message: 'Employee updated successfully',
