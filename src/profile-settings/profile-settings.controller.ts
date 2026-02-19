@@ -68,18 +68,12 @@ export class ProfileSettingsController {
 
   @Get('me')
   getProfile(@Req() req: any) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    return this.profileSettingsService.getProfile(this.getUserId(req), baseUrl);
+    return this.profileSettingsService.getProfile(this.getUserId(req));
   }
 
   @Patch('profile')
   updateProfile(@Req() req: any, @Body() dto: UpdateProfileDto) {
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    return this.profileSettingsService.updateProfile(
-      this.getUserId(req),
-      dto,
-      baseUrl,
-    );
+    return this.profileSettingsService.updateProfile(this.getUserId(req), dto);
   }
 
   @Patch('notifications')
@@ -102,38 +96,12 @@ export class ProfileSettingsController {
   }
 
   @Post('upload-avatar')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: diskStorage({
-        destination: './uploads',
-        filename: (req, file, cb) => {
-          const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-          const ext = extname(file.originalname);
-          cb(null, `avatar-${uniqueSuffix}${ext}`);
-        },
-      }),
-      fileFilter: (req, file, cb) => {
-        if (!file.mimetype.match(/\/(jpg|jpeg|png|gif)$/)) {
-          return cb(new BadRequestException('Only image files are allowed!'), false);
-        }
-        cb(null, true);
-      },
-      limits: {
-        fileSize: 5 * 1024 * 1024, // 5MB max
-      },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file'))
   uploadAvatar(@Req() req: any, @UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
 
-    // ✅ FIX: Pass baseUrl as third parameter
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    return this.profileSettingsService.uploadAvatar(
-      this.getUserId(req),
-      file,
-      baseUrl, // ✅ Added missing baseUrl parameter
-    );
+    return this.profileSettingsService.uploadAvatar(this.getUserId(req), file);
   }
 }

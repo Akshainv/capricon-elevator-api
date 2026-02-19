@@ -26,37 +26,26 @@ export class ProfileSettingsService {
       throw new BadRequestException('Invalid user ID');
   }
 
-  async getProfile(userId: string, baseUrl: string) {
+  async getProfile(userId: string) {
     this.validateUserId(userId);
     const employee = await this.employeeModel.findById(userId).select('-password -__v');
     if (!employee) throw new NotFoundException('Employee not found');
 
     const employeeObj = employee.toObject();
 
-    // Use profileImage or photo field
-    // PRIORITIZE CLOUDINARY URL: If photo is a URL (starts with http), use it preferentially
-    let profileImageUrl = employeeObj.profileImage;
-
-    if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
-      profileImageUrl = employeeObj.photo;
-    } else {
-      profileImageUrl = employeeObj.profileImage || employeeObj.photo || undefined;
-    }
-
-    if (profileImageUrl && !profileImageUrl.startsWith('http')) {
-      profileImageUrl = `${baseUrl}/uploads/${profileImageUrl}`;
-    }
+    // Use profileImage or photo field (already stored as absolute Cloudinary URLs)
+    const profileImageUrl = employeeObj.photo || employeeObj.profileImage || 'assets/images/logo1.png';
 
     return {
       ...employeeObj,
       phone: employeeObj.phoneNumber,
       role: 'sales',
       department: employeeObj.department || 'Sales',
-      profileImage: profileImageUrl || 'assets/images/logo1.png', // ✅ Always return profileImage
+      profileImage: profileImageUrl,
     };
   }
 
-  async updateProfile(userId: string, dto: UpdateProfileDto, baseUrl: string) {
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
     this.validateUserId(userId);
 
     const updateData: any = { ...dto };
@@ -75,19 +64,8 @@ export class ProfileSettingsService {
 
     const employeeObj = updated.toObject();
 
-    // Use profileImage or photo field
-    // PRIORITIZE CLOUDINARY URL: If photo is a URL (starts with http), use it preferentially
-    let profileImageUrl = employeeObj.profileImage;
-
-    if (employeeObj.photo && (employeeObj.photo.startsWith('http') || employeeObj.photo.startsWith('https'))) {
-      profileImageUrl = employeeObj.photo;
-    } else {
-      profileImageUrl = employeeObj.profileImage || employeeObj.photo || undefined;
-    }
-
-    if (profileImageUrl && !profileImageUrl.startsWith('http')) {
-      profileImageUrl = `${baseUrl}/uploads/${profileImageUrl}`;
-    }
+    // Use profileImage or photo field (already stored as absolute Cloudinary URLs)
+    const profileImageUrl = employeeObj.photo || employeeObj.profileImage || 'assets/images/logo1.png';
 
     return {
       message: 'Profile updated successfully',
@@ -96,7 +74,7 @@ export class ProfileSettingsService {
         phone: employeeObj.phoneNumber,
         role: 'sales',
         department: 'Sales',
-        profileImage: profileImageUrl || 'assets/images/logo1.png', // ✅ Always return profileImage
+        profileImage: profileImageUrl,
       }
     };
   }
@@ -142,7 +120,7 @@ export class ProfileSettingsService {
     return { message: 'Password changed successfully' };
   }
 
-  async uploadAvatar(userId: string, file: any, baseUrl: string) {
+  async uploadAvatar(userId: string, file: any) {
     this.validateUserId(userId);
 
     // Upload to Cloudinary

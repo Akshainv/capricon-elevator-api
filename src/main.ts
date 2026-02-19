@@ -29,11 +29,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // Serve static files from uploads folder
-  app.useStaticAssets(join(__dirname, '..', 'uploads'), {
-    prefix: '/uploads/',
-  });
-
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
