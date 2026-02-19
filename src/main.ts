@@ -26,6 +26,9 @@ async function bootstrap() {
   // ✅ FIXED CORS CONFIG (Production Safe)
   app.enableCors({
     origin: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
+    exposedHeaders: ['x-user-id'],
     credentials: true,
   });
 
