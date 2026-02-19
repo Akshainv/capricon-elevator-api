@@ -84,6 +84,8 @@ export class QuotationController {
     @Req() req: Request,
     @Query('status') status?: string,
     @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
   ) {
     try {
       // Robust Identity Extraction
@@ -120,9 +122,9 @@ export class QuotationController {
       userId = userId || (req.headers['x-user-id'] as string);
       userRole = userRole || (req.headers['x-user-role'] as string);
 
-      console.log('🔍 Fetching quotations for userId:', userId, 'role:', userRole);
+      console.log('🔍 Fetching quotations for userId:', userId, 'role:', userRole, 'dates:', startDate, '-', endDate);
       const createdBy = (userRole === 'employee' && userId) ? userId : undefined;
-      const result = await this.quotationService.findAll(status, search, createdBy);
+      const result = await this.quotationService.findAll(status, search, createdBy, startDate, endDate);
       return {
         statusCode: HttpStatus.OK,
         message: 'All quotations fetched successfully',

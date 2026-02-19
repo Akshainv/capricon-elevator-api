@@ -91,7 +91,7 @@ export class QuotationService {
     return createQuotation;
   }
 
-  async findAll(status?: string, search?: string, createdBy?: string) {
+  async findAll(status?: string, search?: string, createdBy?: string, startDate?: string, endDate?: string) {
     const query: any = {};
     if (status) query.status = status;
 
@@ -106,6 +106,13 @@ export class QuotationService {
           { createdBy: '' }
         ]
       });
+    }
+
+    if (startDate || endDate) {
+      const dateQuery: any = {};
+      if (startDate) dateQuery.$gte = new Date(startDate);
+      if (endDate) dateQuery.$lte = new Date(endDate);
+      conditions.push({ createdAt: dateQuery });
     }
 
     if (search) {
