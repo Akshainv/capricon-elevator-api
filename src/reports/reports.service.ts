@@ -245,8 +245,9 @@ export class ReportsService {
     const totalProjects = await this.projectModel.countDocuments(matchFilter);
 
     // Quotations
-    const quotationFilter: any = { ...dateFilter };
+    let quotationFilter: any = { ...dateFilter };
     if (filters.quotationStatus) quotationFilter.status = filters.quotationStatus;
+    quotationFilter = this.addOptionalFilters(quotationFilter, filters, 'quotation');
 
     const totalQuotations = await this.quotationModel.countDocuments(quotationFilter);
     const quotationsAccepted = await this.quotationModel.countDocuments({
