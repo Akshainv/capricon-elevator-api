@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -178,5 +179,78 @@ export class FacebookService {
         }
 
         return { success: true, count: syncedCount };
+    }
+
+    getPrivacyPolicyHtml(): string {
+        return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Capricon CRM</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+        h1 { color: #111; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        h2 { color: #2c3e50; margin-top: 30px; }
+        .footer { margin-top: 50px; font-size: 0.9em; color: #777; border-top: 1px solid #eee; padding-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Privacy Policy for Capricon CRM</h1>
+    <p>Last updated: February 23, 2026</p>
+
+    <p>At Capricon CRM, accessible from our application, one of our main priorities is the privacy of our visitors. This Privacy Policy document contains types of information that is collected and recorded by Capricon CRM and how we use it.</p>
+
+    <h2>1. Information We Collect</h2>
+    <p>We only collect information about you if we have a reason to do so—for example, to provide our services, to communicate with you, or to make our services better. This includes Lead data synced from your Facebook Pages (names, emails, and phone numbers) if you choose to connect your Meta account.</p>
+
+    <h2>2. How We Use Your Information</h2>
+    <p>We use the information we collect to provide, operate, and maintain our CRM, including syncing leads from social media platforms to help you manage your sales pipeline efficiently.</p>
+
+    <h2>3. Data Deletion</h2>
+    <p>Users can request the deletion of their data at any time. If you have connected your Meta account, you can remove the application through your Facebook settings. When you do so, you can request that Meta notify us to delete your data. Alternatively, you can contact us directly at developer.inspitetech@gmail.com to request data deletion.</p>
+
+    <h2>4. Contact Us</h2>
+    <p>If you have additional questions or require more information about our Privacy Policy, do not hesitate to contact us at developer.inspitetech@gmail.com.</p>
+
+    <div class="footer">
+        &copy; 2026 Capricon CRM. All rights reserved.
+    </div>
+</body>
+</html>`;
+    }
+
+    async handleDataDeletion(signedRequest: string) {
+        try {
+            const appSecret = this.configService.get('META_APP_SECRET');
+            const [encodedSig, payload] = signedRequest.split('.');
+
+            // Decode the signature
+            const sig = Buffer.from(encodedSig.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+            // Decode the payload
+            const data = JSON.parse(Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString());
+
+            // Verify the signature
+            const expectedSig = crypto.createHmac('sha256', appSecret)
+                .update(payload)
+                .digest();
+
+            if (!crypto.timingSafeEqual(sig, expectedSig)) {
+                this.logger.error('Invalid signature in Facebook data deletion request');
+                throw new Error('Invalid signature');
+            }
+
+            this.logger.log(`Data deletion requested for Facebook User ID: ${data.user_id}`);
+
+            // Return the required response
+            return {
+                url: `${this.configService.get('APP_URL')}/facebook/privacy-policy`,
+                confirmation_code: `DEL_${data.user_id}_${Date.now()}`,
+            };
+        } catch (error) {
+            this.logger.error('Error handling Facebook data deletion:', error.message);
+            throw error;
+        }
     }
 }

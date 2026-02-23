@@ -53,4 +53,16 @@ export class FacebookController {
     async handleWebhook(@Body() body: any) {
         return this.facebookService.handleWebhook(body);
     }
+
+    @Get('privacy-policy')
+    async getPrivacyPolicy(@Res() res) {
+        const html = this.facebookService.getPrivacyPolicyHtml();
+        res.setHeader('Content-Type', 'text/html');
+        return res.send(html);
+    }
+
+    @Post('data-deletion')
+    async handleDataDeletion(@Body('signed_request') signedRequest: string) {
+        return this.facebookService.handleDataDeletion(signedRequest);
+    }
 }
