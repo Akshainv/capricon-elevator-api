@@ -231,7 +231,7 @@ export class QuotationService {
 
   // Email verification logic
   private isValidEmailFormat(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
     return emailRegex.test(email);
   }
 
@@ -239,9 +239,14 @@ export class QuotationService {
     return new Promise((resolve) => {
       dns.resolveMx(domain, (err, addresses) => {
         if (err) {
-          resolve({ valid: true, error: `MX lookup failed: ${err.code}` }); // Leniency
+          if (err.code === 'ENOTFOUND') {
+            resolve({ valid: false, error: `Domain not found: ${domain}` });
+          } else {
+            // For other errors (timeout, DNS failure), be lenient so we don't block legitimate emails
+            resolve({ valid: true, error: `MX lookup failed: ${err.code}` });
+          }
         } else {
-          resolve({ valid: true, mxRecords: addresses });
+          resolve({ valid: addresses && addresses.length > 0, mxRecords: addresses });
         }
       });
     });

@@ -1,5 +1,5 @@
 // src/lead/lead.service.ts (Backend) - COMPLETE FIXED FILE
-import { Injectable, HttpException, HttpStatus, BadRequestException } from '@nestjs/common';
+import { Injectable, HttpException, HttpStatus, BadRequestException, OnModuleInit } from '@nestjs/common';
 import { CreateLeadDto } from './dto/create-lead.dtos';
 import { UpdateLeadDto } from './dto/update-lead.dtos';
 import { InjectModel } from '@nestjs/mongoose';
@@ -12,7 +12,7 @@ import { User, UserDocument } from '../auth/schemas/user.schema';
 import { Employee, EmployeeDocument } from '../employee/schemas/employeeSchema';
 
 @Injectable()
-export class LeadService {
+export class LeadService implements OnModuleInit {
   constructor(
     @InjectModel(Lead.name) private LeadModel: Model<LeadDocument>,
     @InjectModel(assignLead.name)
@@ -22,18 +22,23 @@ export class LeadService {
     private notificationsService: NotificationsService,
   ) { }
 
-  async createLead(dto: CreateLeadDto) {
-    const existingLead = await this.LeadModel.findOne({
-      $or: [{ email: dto.email }, { phoneNumber: dto.phoneNumber }],
-    }).exec();
-
-    if (existingLead) {
-      throw new HttpException(
-        'Lead with the same email or phone number already exists',
-        HttpStatus.BAD_REQUEST,
-      );
+  async onModuleInit() {
+    try {
+      // ⚠️ DANGEROUS BUT NECESSARY: Automatically drop the unique index on email
+      // This is required because removing 'unique: true' from the schema doesn't drop the index in MongoDB
+      console.log('🚀 LeadService: Attempting to drop unique index on email...');
+      await this.LeadModel.collection.dropIndex('email_1');
+      console.log('✅ LeadService: Successfully dropped "email_1" index.');
+    } catch (error) {
+      if (error.codeName === 'IndexNotFound' || error.message.includes('index not found')) {
+        console.log('ℹ️ LeadService: Unique index "email_1" does not exist. No action needed.');
+      } else {
+        console.warn('⚠️ LeadService: Unexpected error while dropping index:', error.message);
+      }
     }
+  }
 
+  async createLead(dto: CreateLeadDto) {
     const lead = await this.LeadModel.create(dto);
 
     // ✅ NOTIFY ADMINS of new lead (except the creator)
