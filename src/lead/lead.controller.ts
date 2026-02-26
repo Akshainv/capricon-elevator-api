@@ -10,15 +10,21 @@ import {
   Patch,
   HttpStatus,
   HttpException,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { LeadService } from './lead.service';
 import { CreateLeadDto } from './dto/create-lead.dtos';
 import { UpdateLeadDto } from './dto/update-lead.dtos';
 import { CreateAssignLeadDto } from '../lead/dto/create-assign-lead.dto';
+import { JwtService } from '@nestjs/jwt';
 
 @Controller('lead')
 export class LeadController {
-  constructor(private readonly leadService: LeadService) { }
+  constructor(
+    private readonly leadService: LeadService,
+    private readonly jwtService: JwtService
+  ) { }
 
   // ====================== CREATE ======================
   @Post()
@@ -135,15 +141,42 @@ export class LeadController {
   // ====================== CRITICAL: STATUS UPDATE (BEFORE :id) ======================
   // ✅ THIS MUST COME BEFORE @Get(':id') AND @Put(':id')
   @Patch(':id/status')
-  async updateStatus(@Param('id') id: string, @Body('status') status: string) {
+  async updateStatus(
+    @Param('id') id: string,
+    @Body('status') status: string,
+    @Req() req: Request
+  ) {
+    // Robust Identity Extraction
+    let userId: string | undefined;
+    const reqUser = (req as any).user;
+    if (reqUser) {
+      userId = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+    }
+
+    if (!userId) {
+      const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+      if (authHeader && authHeader.toString().startsWith('Bearer ')) {
+        try {
+          const token = authHeader.toString().split(' ')[1];
+          const payload = this.jwtService.decode(token) as any;
+          if (payload) {
+            userId = payload.sub || payload.userId || payload._id || payload.id;
+          }
+        } catch (e) {
+          console.error('Failed to decode token in LeadController:', e);
+        }
+      }
+    }
+
     console.log('==============================================');
     console.log('📥 PATCH /lead/:id/status endpoint hit');
     console.log('Lead ID:', id);
     console.log('New Status:', status);
+    console.log('Updated By:', userId);
     console.log('==============================================');
 
     try {
-      const result = await this.leadService.updateLeadStatus(id, status);
+      const result = await this.leadService.updateLeadStatus(id, status, userId);
       return {
         statusCode: HttpStatus.OK,
         ...result

@@ -16,4 +16,4 @@ import { Employee, EmployeeSchema } from '../employee/schemas/employeeSchema';
   providers: [DealService],
   exports: [MongooseModule],
 })
-export class DealModule {}
+export class DealModule { }

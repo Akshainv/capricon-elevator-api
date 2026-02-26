@@ -10,15 +10,21 @@ import {
   HttpStatus,
   HttpException,
   Query,
+  Req,
 } from '@nestjs/common';
 import { ProjectService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { UpdateProjectProgressDto } from './dto/update-project-progress.dto';
+import type { Request } from 'express';
+import { JwtService } from '@nestjs/jwt';
 
 @Controller('project')
 export class ProjectController {
-  constructor(private readonly projectService: ProjectService) {}
+  constructor(
+    private readonly projectService: ProjectService,
+    private readonly jwtService: JwtService
+  ) { }
 
   @Post()
   async create(@Body() createProjectDto: CreateProjectDto) {
@@ -170,13 +176,34 @@ export class ProjectController {
     }
   }
 
-  // Update project progress (for sales executives)
   @Patch(':id/progress')
   async updateProgress(
     @Param('id') id: string,
     @Body() updateProgressDto: UpdateProjectProgressDto,
+    @Req() req: Request,
   ) {
     try {
+      // Robust Identity Extraction
+      if (!updateProgressDto.updatedBy) {
+        const reqUser = (req as any).user;
+        if (reqUser) {
+          updateProgressDto.updatedBy = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+        }
+
+        if (!updateProgressDto.updatedBy) {
+          const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+          if (authHeader && authHeader.toString().startsWith('Bearer ')) {
+            try {
+              const token = authHeader.toString().split(' ')[1];
+              const payload = this.jwtService.decode(token) as any;
+              if (payload) {
+                updateProgressDto.updatedBy = payload.sub || payload.userId || payload._id || payload.id;
+              }
+            } catch (e) { }
+          }
+        }
+      }
+
       const result = await this.projectService.updateProgress(id, updateProgressDto);
       return {
         statusCode: HttpStatus.OK,
@@ -188,13 +215,34 @@ export class ProjectController {
     }
   }
 
-  // Update project status
   @Patch(':id/status')
   async updateStatus(
     @Param('id') id: string,
     @Body() body: { status: string; updatedBy: string },
+    @Req() req: Request,
   ) {
     try {
+      // Robust Identity Extraction
+      if (!body.updatedBy) {
+        const reqUser = (req as any).user;
+        if (reqUser) {
+          body.updatedBy = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+        }
+
+        if (!body.updatedBy) {
+          const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+          if (authHeader && authHeader.toString().startsWith('Bearer ')) {
+            try {
+              const token = authHeader.toString().split(' ')[1];
+              const payload = this.jwtService.decode(token) as any;
+              if (payload) {
+                body.updatedBy = payload.sub || payload.userId || payload._id || payload.id;
+              }
+            } catch (e) { }
+          }
+        }
+      }
+
       const result = await this.projectService.updateStatus(
         id,
         body.status,

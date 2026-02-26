@@ -43,15 +43,34 @@ export class LeadService implements OnModuleInit {
 
     // ✅ NOTIFY ADMINS of new lead (except the creator)
     try {
-      const admins = await this.userModel.find({
-        role: 'admin',
-        _id: { $ne: lead.createdBy }
-      }).exec();
+      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+      const admins = allAdmins.filter(admin =>
+        admin._id.toString() !== (lead.createdBy ? lead.createdBy.toString() : null)
+      );
+
+      let creatorName = 'A sales employee';
+      if (lead.createdBy) {
+        const creatorIdStr = lead.createdBy.toString();
+        if (creatorIdStr === 'admin' || creatorIdStr === 'system') {
+          creatorName = creatorIdStr === 'admin' ? 'Administrator' : 'System';
+        } else {
+          const emp = await this.employeeModel.findById(lead.createdBy).exec();
+          if (emp) {
+            creatorName = emp.fullName;
+          } else {
+            const user = await this.userModel.findById(lead.createdBy).exec();
+            if (user) {
+              creatorName = user.email ? user.email.split('@')[0] : 'Admin';
+            }
+          }
+        }
+      }
+
       for (const admin of admins) {
         await this.notificationsService.create({
           icon: 'fa-user-plus',
           title: 'New Lead Registered',
-          message: `A new lead ${lead.fullName} has registered via ${lead.leadSource}.`,
+          message: `${creatorName} registered a new lead: ${lead.fullName} via ${lead.leadSource}.`,
           time: new Date().toISOString(),
           type: 'info',
           isRead: false,
@@ -76,36 +95,39 @@ export class LeadService implements OnModuleInit {
     const creatorId = lead.createdBy ? lead.createdBy.toString() : null;
 
     if (creatorId) {
-      try {
-        // 1. Try Employee Model
-        const employee = await this.employeeModel.findById(creatorId).exec();
-        if (employee) {
-          createdBySalesName = employee.fullName;
-        } else {
-          // 2. Try User Model (Admins)
-          const user = await this.userModel.findById(creatorId).exec();
-          if (user) {
-            createdBySalesName = 'Admin (' + (user.email ? user.email.split('@')[0] : 'Unknown') + ')';
+      if (creatorId === 'admin' || creatorId === 'system') {
+        createdBySalesName = creatorId === 'admin' ? 'Administrator' : 'System';
+      } else {
+        try {
+          // 1. Try Employee Model
+          const employee = await this.employeeModel.findById(creatorId).exec();
+          if (employee) {
+            createdBySalesName = employee.fullName;
           } else {
-            // 3. Fallback: Check if creatorId is actually an email (legacy/edge case)
-            const userByEmail = await this.userModel.findOne({ email: creatorId }).exec();
-            if (userByEmail) {
-              createdBySalesName = 'Admin (' + (userByEmail.email ? userByEmail.email.split('@')[0] : 'Unknown') + ')';
+            // 2. Try User Model (Admins)
+            const user = await this.userModel.findById(creatorId).exec();
+            if (user) {
+              createdBySalesName = user.email ? user.email.split('@')[0] : 'Administrator';
             } else {
-              const empByEmail = await this.employeeModel.findOne({ email: creatorId }).exec();
-              if (empByEmail) {
-                createdBySalesName = empByEmail.fullName;
+              // 3. Fallback: Check if creatorId is actually an email (legacy/edge case)
+              const userByEmail = await this.userModel.findOne({ email: creatorId }).exec();
+              if (userByEmail) {
+                createdBySalesName = userByEmail.email ? userByEmail.email.split('@')[0] : 'Administrator';
               } else {
-                // If nothing found, return early with ID for frontend fallback
-                console.warn(`[WARN] No creator found for ID/Email: ${creatorId}`);
-                createdBySalesName = creatorId;
+                const empByEmail = await this.employeeModel.findOne({ email: creatorId }).exec();
+                if (empByEmail) {
+                  createdBySalesName = empByEmail.fullName;
+                } else {
+                  // If nothing found, return early with ID for frontend fallback
+                  console.warn(`[WARN] No creator found for ID/Email: ${creatorId}`);
+                  createdBySalesName = creatorId;
+                }
               }
             }
           }
+        } catch (err) {
+          createdBySalesName = creatorId; // Pass ID on error
         }
-      } catch (err) {
-        console.error(`[ERROR] Failed to resolve creator for ${creatorId}:`, err);
-        createdBySalesName = creatorId; // Pass ID on error
       }
     }
     return { ...leadObj, createdBySalesName };
@@ -160,11 +182,13 @@ export class LeadService implements OnModuleInit {
     }
 
     const query: any = {
-      $or: [
-        { createdBy: userId },
-        { createdBy: userEmail }
-      ],
       $and: [
+        {
+          $or: [
+            { createdBy: userId },
+            { createdBy: userEmail }
+          ]
+        },
         {
           $or: [
             { assignedTo: { $exists: false } },
@@ -216,7 +240,9 @@ export class LeadService implements OnModuleInit {
             { assignedTo: userEmail }
           ]
         },
-        { createdBy: { $nin: [userId, userEmail] } },
+        {
+          createdBy: { $nin: [userId, userEmail] }
+        },
         {
           $or: [
             { isConverted: { $exists: false } },
@@ -243,7 +269,6 @@ export class LeadService implements OnModuleInit {
     };
   }
 
-  // ✅ FIXED: Changed 'New' to 'Seeded Lead' to match schema
   async getUnassignedAndUnconvertedLeads() {
     const leads = await this.LeadModel.find({
       status: 'Seeded Lead',  // ✅ FIXED: Was 'New', now 'Seeded Lead'
@@ -284,10 +309,7 @@ export class LeadService implements OnModuleInit {
     const updatedLead = await this.LeadModel.findByIdAndUpdate(
       id,
       { $set: dto },
-      {
-        new: true,
-        runValidators: true
-      }
+      { new: true, runValidators: true }
     ).exec();
 
     if (!updatedLead) {
@@ -306,12 +328,13 @@ export class LeadService implements OnModuleInit {
   }
 
   // ✅ DEDICATED STATUS UPDATE: Update ONLY the status field
-  async updateLeadStatus(id: string, status: string) {
-    console.log('==============================================');
-    console.log('Backend Service: Updating lead STATUS');
-    console.log('Lead ID:', id);
-    console.log('New status:', status);
-    console.log('==============================================');
+  async updateLeadStatus(id: string, status: string, updatedBy?: string) {
+    console.log('Backend Service: Updating lead STATUS', { id, status, updatedBy });
+
+    const lead = await this.LeadModel.findById(id).exec();
+    if (!lead) {
+      throw new HttpException('Lead not found', HttpStatus.NOT_FOUND);
+    }
 
     const updatedLead = await this.LeadModel.findByIdAndUpdate(
       id,
@@ -319,14 +342,52 @@ export class LeadService implements OnModuleInit {
       { new: true, runValidators: true }
     ).exec();
 
-    if (!updatedLead) {
-      throw new HttpException('Lead not found', HttpStatus.NOT_FOUND);
-    }
+    // ✅ NOTIFY ADMINS when status is updated (except the person who updated it)
+    try {
+      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+      const admins = allAdmins.filter(admin =>
+        admin._id.toString() !== (updatedBy ? updatedBy.toString() : null)
+      );
 
-    console.log('==============================================');
-    console.log('Backend Service: Status updated successfully');
-    console.log('New status in DB:', updatedLead.status);
-    console.log('==============================================');
+      let updaterName = 'A sales employee';
+      if (updatedBy) {
+        if (updatedBy === 'admin' || updatedBy === 'system') {
+          updaterName = updatedBy === 'admin' ? 'Administrator' : 'System';
+        } else {
+          try {
+            // Try Employee model first
+            const emp = await this.employeeModel.findById(updatedBy).exec();
+            if (emp) {
+              updaterName = emp.fullName;
+            } else {
+              // Try User model
+              const user = await this.userModel.findById(updatedBy).exec();
+              if (user) {
+                updaterName = user.email ? user.email.split('@')[0] : 'Admin';
+              }
+            }
+          } catch (e) {
+            updaterName = updatedBy;
+          }
+        }
+      }
+
+      for (const admin of admins) {
+        await this.notificationsService.create({
+          icon: 'fa-tasks',
+          title: 'Lead Status Updated',
+          message: `${updaterName} updated status of ${lead.fullName} to ${status}.`,
+          time: new Date().toISOString(),
+          type: 'info',
+          isRead: false,
+          userId: admin._id.toString(),
+          leadId: lead._id.toString(),
+          actionLink: '/admin-leads'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to notify admins of lead status update:', error);
+    }
 
     return {
       message: 'Lead status updated successfully',

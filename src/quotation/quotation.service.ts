@@ -4,13 +4,16 @@ import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { InjectModel } from '@nestjs/mongoose';
 import { Quotation, QuotationDocument } from './schemas/quotation.schema';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { Employee, EmployeeDocument } from '../employee/schemas/employeeSchema';
 import * as nodemailer from 'nodemailer';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as dns from 'dns';
 import * as net from 'net';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class QuotationService {
@@ -19,6 +22,9 @@ export class QuotationService {
   constructor(
     @InjectModel(Quotation.name)
     private quotationModel: Model<QuotationDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
+    private readonly notificationsService: NotificationsService,
   ) {
     const sanitize = (v?: string) => {
       if (!v) return '';
@@ -76,6 +82,8 @@ export class QuotationService {
   async create(createQuotationDto: CreateQuotationDto, createdBy: string) {
     const quoteNumber = await this.generateQuoteNumber();
 
+    console.log('🏗️ Creating quotation in service:', { quoteNumber, createdBy });
+
     const validUntil = new Date();
     validUntil.setDate(validUntil.getDate() + 30);
 
@@ -84,11 +92,106 @@ export class QuotationService {
       quoteNumber,
       validUntil,
       status: createQuotationDto.status || 'draft',
-      createdBy,
+      createdBy, // Use the ID passed from controller
     };
 
     const createQuotation = await this.quotationModel.create(quotationData);
-    return createQuotation;
+    console.log('✅ Quotation created with ID:', createQuotation._id, 'createdBy:', createQuotation.createdBy);
+    const enriched = await this.enrichQuotationWithCreator(createQuotation);
+
+    // ✅ Send Notifications to Admins (except the creator if they are an admin)
+    try {
+      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+      const admins = allAdmins.filter(admin =>
+        admin._id.toString() !== (createdBy ? createdBy.toString() : null)
+      );
+      const creatorName = enriched.createdBySalesName || 'A salesperson';
+
+      for (const admin of admins) {
+        // 1. In-app Notification
+        await this.notificationsService.create({
+          icon: 'fa-file-invoice',
+          title: 'New Quotation Created',
+          message: `${creatorName} has created a new quotation ${quoteNumber} for ${createQuotationDto.customerName}.`,
+          time: new Date().toISOString(),
+          type: 'info',
+          isRead: false,
+          userId: admin._id.toString(),
+          actionLink: '/admin/admin-quotations'
+        });
+
+        // 2. Email Notification (Simple)
+        const fromAddress = process.env.EMAIL_USER || 'noreply@capricornelevators.com';
+        await this.transporter.sendMail({
+          from: `"Capricorn CRM" <${fromAddress}>`,
+          to: admin.email,
+          subject: `New Quotation Created: ${quoteNumber}`,
+          html: `
+            <div style="font-family: Arial, sans-serif; padding: 20px;">
+              <h3>New Quotation Alert</h3>
+              <p><strong>Quotation Number:</strong> ${quoteNumber}</p>
+              <p><strong>Customer:</strong> ${createQuotationDto.customerName}</p>
+              <p><strong>Created By:</strong> ${creatorName}</p>
+              <p><strong>Total Value:</strong> INR ${createQuotationDto.totalCost?.toLocaleString('en-IN')}</p>
+              <br>
+              <p>Please log in to the admin dashboard to review.</p>
+            </div>
+          `
+        }).catch(err => console.error(`Failed to send email to admin ${admin.email}:`, err.message));
+      }
+    } catch (error) {
+      console.error('Failed to process admin notifications for quotation:', error);
+    }
+
+    return enriched;
+  }
+
+  private async enrichQuotationWithCreator(quotation: any) {
+    const quoteObj = quotation.toObject ? quotation.toObject() : quotation;
+    let createdBySalesName = 'Unknown';
+    const creatorId = quotation.createdBy ? quotation.createdBy.toString() : null;
+
+    console.log(`🔍 Resolving creator name for ID: "${creatorId}"`);
+
+    if (creatorId) {
+      if (creatorId === 'admin' || creatorId === 'system') {
+        createdBySalesName = creatorId === 'admin' ? 'Administrator' : 'System';
+      } else {
+        try {
+          // 1. Try Employee Model (Prioritize Salesperson)
+          const employee = await this.employeeModel.findById(creatorId).exec();
+          if (employee) {
+            console.log(`✅ Found creator in Employee model: ${employee.fullName}`);
+            createdBySalesName = employee.fullName;
+          } else {
+            // 2. Try User Model (Admins)
+            const user = await this.userModel.findById(creatorId).exec();
+            if (user) {
+              console.log(`✅ Found creator in User model: ${user.email}`);
+              createdBySalesName = user.email ? user.email.split('@')[0] : 'Administrator';
+            } else {
+              // 3. Fallback: Check if creatorId is actually an email (legacy/edge case)
+              const userByEmail = await this.userModel.findOne({ email: creatorId }).exec();
+              if (userByEmail) {
+                createdBySalesName = userByEmail.email ? userByEmail.email.split('@')[0] : 'Administrator';
+              } else {
+                const empByEmail = await this.employeeModel.findOne({ email: creatorId }).exec();
+                if (empByEmail) {
+                  createdBySalesName = empByEmail.fullName;
+                } else {
+                  createdBySalesName = creatorId;
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.error(`[ERROR] Failed to resolve creator for quotation: ${creatorId}`, err);
+          createdBySalesName = creatorId;
+        }
+      }
+    }
+    console.log(`✨ Resolved name: "${createdBySalesName}"`);
+    return { ...quoteObj, createdBySalesName };
   }
 
   async findAll(status?: string, search?: string, createdBy?: string, startDate?: string, endDate?: string) {
@@ -130,10 +233,12 @@ export class QuotationService {
       query.$and = conditions;
     }
 
-    return await this.quotationModel
+    const quotations = await this.quotationModel
       .find(query)
       .sort({ createdAt: -1 })
       .exec();
+
+    return await Promise.all(quotations.map(async (q) => await this.enrichQuotationWithCreator(q)));
   }
 
   async getStatsSummary() {
@@ -196,7 +301,7 @@ export class QuotationService {
     if (!quotation) {
       throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
     }
-    return quotation;
+    return await this.enrichQuotationWithCreator(quotation);
   }
 
   async update(id: string, updateQuotationDto: UpdateQuotationDto) {
@@ -209,13 +314,34 @@ export class QuotationService {
     return updatedQuotation;
   }
 
-  async updateStatus(id: string, status: string) {
+  async updateStatus(id: string, status: string, updatedBy?: string) {
+    const quotation = await this.quotationModel.findById(id).exec();
+    if (!quotation) {
+      throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
+    }
+
     const updatedQuotation = await this.quotationModel
       .findByIdAndUpdate(id, { status }, { new: true })
       .exec();
-    if (!updatedQuotation) {
-      throw new HttpException('Quotation not found', HttpStatus.NOT_FOUND);
+
+    // ✅ NOTIFY SALES EMPLOYEE when quotation is APPROVED
+    if (status === 'approved' && quotation.createdBy) {
+      try {
+        await this.notificationsService.create({
+          icon: 'fa-check-circle',
+          title: 'Quotation Approved',
+          message: `Your quotation for ${quotation.customerName} has been approved by Admin.`,
+          time: new Date().toISOString(),
+          type: 'success',
+          isRead: false,
+          userId: quotation.createdBy,
+          actionLink: '/activities'
+        });
+      } catch (error) {
+        console.error('Failed to notify employee of quotation approval:', error);
+      }
     }
+
     return updatedQuotation;
   }
 
@@ -239,10 +365,12 @@ export class QuotationService {
     return new Promise((resolve) => {
       dns.resolveMx(domain, (err, addresses) => {
         if (err) {
+          console.warn(`[DNS WARN] MX resolution failed for ${domain}: ${err.code}`);
+          // Be lenient: only fail if we're sure the domain doesn't exist
           if (err.code === 'ENOTFOUND') {
             resolve({ valid: false, error: `Domain not found: ${domain}` });
           } else {
-            // For other errors (timeout, DNS failure), be lenient so we don't block legitimate emails
+            // For timeouts, servfail, etc., assume it might be valid to avoid blocking
             resolve({ valid: true, error: `MX lookup failed: ${err.code}` });
           }
         } else {
@@ -270,9 +398,7 @@ export class QuotationService {
 
   async verifyEmail(email: string): Promise<{ valid: boolean; error?: string }> {
     if (!this.isValidEmailFormat(email)) return { valid: false, error: 'Invalid format' };
-    const domain = email.split('@')[1];
-    const mxResult = await this.verifyDomainMX(domain);
-    return { valid: mxResult.valid };
+    return { valid: true };
   }
 
   async sendQuotationWithPDF(id: string, email: string, quotationData: any) {
@@ -283,11 +409,9 @@ export class QuotationService {
       throw new HttpException('Recipient email missing', HttpStatus.BAD_REQUEST);
     }
 
-    // ✅ Add Email Verification before sending
-    const verification = await this.verifyEmail(recipientEmail);
-    if (!verification.valid) {
+    if (!this.isValidEmailFormat(recipientEmail)) {
       throw new HttpException(
-        verification.error || 'Invalid email address or domain',
+        'Invalid email address format',
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -313,7 +437,10 @@ export class QuotationService {
         ],
       };
 
+      console.log(`📧 Attempting to send email via SMTP to ${recipientEmail}...`);
       const info = await this.transporter.sendMail(mailOptions);
+      console.log(`✅ Email sent successfully! MessageID: ${info?.messageId}`);
+
       await this.updateStatus(id, 'sent');
       return {
         message: 'Quotation sent successfully',
@@ -321,7 +448,11 @@ export class QuotationService {
         messageId: info?.messageId,
       };
     } catch (error: any) {
-      console.error('❌ Email error:', error);
+      console.error('❌ SMTP Error details:', {
+        message: error.message,
+        code: error.code,
+        command: error.command
+      });
       throw new HttpException(
         'Failed to send email: ' + error.message,
         HttpStatus.INTERNAL_SERVER_ERROR,

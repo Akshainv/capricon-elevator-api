@@ -5,13 +5,23 @@ import { Model, Types } from 'mongoose';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { UpdateProjectProgressDto } from './dto/update-project-progress.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import { User, UserDocument } from '../auth/schemas/user.schema';
+import { Employee, EmployeeDocument } from '../employee/schemas/employeeSchema';
 import { Project, ProjectDocument } from './schemas/project.schema';
+import { Req } from '@nestjs/common';
+import type { Request } from 'express';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class ProjectService {
   constructor(
     @InjectModel(Project.name) private projectModel: Model<ProjectDocument>,
-  ) {}
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
+    private notificationsService: NotificationsService,
+    private readonly jwtService: JwtService, // Added JwtService to ProjectService constructor
+  ) { }
 
   async create(createProjectDto: CreateProjectDto) {
     // Set default values
@@ -68,7 +78,7 @@ export class ProjectService {
   // Get active projects (not completed or cancelled)
   async findActiveProjects() {
     const projects = await this.projectModel
-      .find({ 
+      .find({
         projectStatus: { $nin: ['completed', 'cancelled'] }
       })
       .sort({ createdAt: -1 })
@@ -88,7 +98,7 @@ export class ProjectService {
   // Get projects by milestone
   async findByMilestone(milestone: string) {
     const projects = await this.projectModel
-      .find({ 
+      .find({
         currentMilestone: milestone,
         projectStatus: { $nin: ['completed', 'cancelled'] }
       })
@@ -109,7 +119,7 @@ export class ProjectService {
     const updatedProject = await this.projectModel
       .findByIdAndUpdate(id, updateProjectDto, { new: true })
       .exec();
-    
+
     if (!updatedProject) {
       throw new NotFoundException('Project not found or could not be updated');
     }
@@ -125,7 +135,7 @@ export class ProjectService {
     console.log('==============================================');
 
     const project = await this.projectModel.findById(id).exec();
-    
+
     if (!project) {
       console.error('❌ Project not found');
       throw new NotFoundException('Project not found');
@@ -157,7 +167,7 @@ export class ProjectService {
     // ✅ CRITICAL FIX: Use completedMilestone from request (the milestone user just clicked)
     const justCompletedMilestone = updateProgressDto.completedMilestone || project.currentMilestone;
     const nextMilestone = updateProgressDto.currentMilestone;
-    
+
     console.log('Milestone transition logic:');
     console.log('  - Milestone being completed NOW:', justCompletedMilestone);
     console.log('  - Next milestone to work on:', nextMilestone);
@@ -204,6 +214,46 @@ export class ProjectService {
         .findByIdAndUpdate(id, updateData, { new: true })
         .exec();
 
+      // ✅ NOTIFY ADMINS of progress update
+      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+      const admins = allAdmins.filter(admin =>
+        admin._id.toString() !== (updateProgressDto.updatedBy ? updateProgressDto.updatedBy.toString() : null)
+      );
+
+      let updaterName = 'A sales employee';
+      if (updateProgressDto.updatedBy) {
+        if (updateProgressDto.updatedBy === 'admin' || updateProgressDto.updatedBy === 'system') {
+          updaterName = updateProgressDto.updatedBy === 'admin' ? 'Administrator' : 'System';
+        } else {
+          try {
+            const emp = await this.employeeModel.findById(updateProgressDto.updatedBy).exec();
+            if (emp) {
+              updaterName = emp.fullName;
+            } else {
+              const user = await this.userModel.findById(updateProgressDto.updatedBy).exec();
+              if (user) {
+                updaterName = user.email ? user.email.split('@')[0] : 'Admin';
+              }
+            }
+          } catch (e) {
+            updaterName = updateProgressDto.updatedBy;
+          }
+        }
+      }
+
+      for (const admin of admins) {
+        await this.notificationsService.create({
+          icon: 'fa-tasks',
+          title: 'Project Progress Updated',
+          message: `${updaterName} updated progress for ${project.projectName} to ${updateProgressDto.progressPercentage}%.`,
+          time: new Date().toISOString(),
+          type: 'info',
+          isRead: false,
+          userId: admin._id.toString(),
+          actionLink: '/admin/admin-projects'
+        });
+      }
+
       console.log('==============================================');
       console.log('✅ BACKEND: Project updated successfully in database');
       console.log('Updated project state AFTER update:');
@@ -211,7 +261,7 @@ export class ProjectService {
       console.log('  - progressPercentage:', updatedProject?.progressPercentage);
       console.log('  - projectStatus:', updatedProject?.projectStatus);
       console.log('  - progressHistory length:', updatedProject?.progressHistory?.length || 0);
-      
+
       if (updatedProject?.progressHistory && updatedProject.progressHistory.length > 0) {
         console.log('All completed milestones in progressHistory:');
         updatedProject.progressHistory.forEach((entry: any, index: number) => {
@@ -240,7 +290,7 @@ export class ProjectService {
     console.log('==============================================');
 
     const project = await this.projectModel.findById(id).exec();
-    
+
     if (!project) {
       throw new NotFoundException('Project not found');
     }
@@ -277,6 +327,50 @@ export class ProjectService {
       .findByIdAndUpdate(id, updateData, { new: true })
       .exec();
 
+    // ✅ NOTIFY ADMINS of status update
+    try {
+      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+      const admins = allAdmins.filter(admin =>
+        admin._id.toString() !== (updatedBy ? updatedBy.toString() : null)
+      );
+
+      let updaterName = 'A sales employee';
+      if (updatedBy) {
+        if (updatedBy === 'admin' || updatedBy === 'system') {
+          updaterName = updatedBy === 'admin' ? 'Administrator' : 'System';
+        } else {
+          try {
+            const emp = await this.employeeModel.findById(updatedBy).exec();
+            if (emp) {
+              updaterName = emp.fullName;
+            } else {
+              const user = await this.userModel.findById(updatedBy).exec();
+              if (user) {
+                updaterName = user.email ? user.email.split('@')[0] : 'Admin';
+              }
+            }
+          } catch (e) {
+            updaterName = updatedBy;
+          }
+        }
+      }
+
+      for (const admin of admins) {
+        await this.notificationsService.create({
+          icon: 'fa-info-circle',
+          title: 'Project Status Updated',
+          message: `${updaterName} updated status of ${project.projectName} to ${newStatus}.`,
+          time: new Date().toISOString(),
+          type: 'info',
+          isRead: false,
+          userId: admin._id.toString(),
+          actionLink: '/admin/admin-projects'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to notify admins of project status update:', error);
+    }
+
     console.log('✅ Status updated successfully');
     console.log('New project status:', updatedProject?.projectStatus);
     console.log('==============================================');
@@ -294,7 +388,7 @@ export class ProjectService {
     console.log('==============================================');
 
     const project = await this.projectModel.findById(id).exec();
-    
+
     if (!project) {
       throw new NotFoundException('Project not found');
     }
@@ -357,13 +451,13 @@ export class ProjectService {
     console.log('==============================================');
 
     let query: any = {};
-    
+
     if (salesExecutiveId) {
       query.assignedTo = salesExecutiveId;
     } else if (projectManagerId) {
       query.projectManager = projectManagerId;
     }
-    
+
     const [
       totalProjects,
       activeProjects,
@@ -372,8 +466,8 @@ export class ProjectService {
       cancelledProjects
     ] = await Promise.all([
       this.projectModel.countDocuments(query).exec(),
-      this.projectModel.countDocuments({ 
-        ...query, 
+      this.projectModel.countDocuments({
+        ...query,
         projectStatus: { $nin: ['completed', 'cancelled'] }
       }).exec(),
       this.projectModel.countDocuments({ ...query, projectStatus: 'completed' }).exec(),
@@ -382,7 +476,7 @@ export class ProjectService {
     ]);
 
     const projects = await this.projectModel.find(query).exec();
-    
+
     const totalValue = projects.reduce((sum, project) => sum + project.projectValue, 0);
     const completedValue = projects
       .filter(p => p.projectStatus === 'completed')
@@ -393,17 +487,17 @@ export class ProjectService {
     const totalAmountPaid = projects.reduce((sum, project) => sum + (project.amountPaid || 0), 0);
     const totalAmountPending = projects.reduce((sum, project) => sum + (project.amountPending || 0), 0);
 
-    const completionRate = totalProjects > 0 
-      ? Math.round((completedProjects / totalProjects) * 100) 
+    const completionRate = totalProjects > 0
+      ? Math.round((completedProjects / totalProjects) * 100)
       : 0;
 
     // Calculate average progress
     const avgProgress = activeProjects > 0
       ? Math.round(
-          projects
-            .filter(p => p.projectStatus !== 'completed' && p.projectStatus !== 'cancelled')
-            .reduce((sum, p) => sum + p.progressPercentage, 0) / activeProjects
-        )
+        projects
+          .filter(p => p.projectStatus !== 'completed' && p.projectStatus !== 'cancelled')
+          .reduce((sum, p) => sum + p.progressPercentage, 0) / activeProjects
+      )
       : 0;
 
     // Milestone breakdown
@@ -453,12 +547,12 @@ export class ProjectService {
     console.log('==============================================');
 
     const project = await this.projectModel.findById(id).exec();
-    
+
     if (!project) {
       throw new NotFoundException('Project not found');
     }
 
-    const history = project.progressHistory.sort((a, b) => 
+    const history = project.progressHistory.sort((a, b) =>
       new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
     );
 

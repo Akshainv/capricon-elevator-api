@@ -231,6 +231,7 @@ export class QuotationController {
     @Body() emailData: { email: string; quotationData: any },
   ) {
     try {
+      console.log(`📤 Received request to send quotation ${id} to ${emailData.email}`);
       const result = await this.quotationService.sendQuotationWithPDF(
         id,
         emailData.email,

@@ -11,7 +11,7 @@ export class DealService {
   constructor(
     @InjectModel(deal.name) private dealModel: Model<dealDocument>,
     @InjectModel(Employee.name) private employeeModel: Model<EmployeeDocument>,
-  ) {}
+  ) { }
 
   // ✅ UPDATED: Helper method to enrich deal with employee name for display
   private async enrichDealWithEmployeeName(deal: any) {
@@ -56,17 +56,17 @@ export class DealService {
 
     // ✅ FIX: Try multiple ways to find the employee
     let employee: any = null;
-    
+
     try {
       // First, try to find by MongoDB _id
       employee = await this.employeeModel.findById(createdBy).exec();
-      
+
       // If not found, try to find by user reference field
       if (!employee) {
         console.log('Employee not found by _id, trying user field...');
         employee = await this.employeeModel.findOne({ user: createdBy }).exec();
       }
-      
+
       // If still not found, try userId field
       if (!employee) {
         console.log('Employee not found by user field, trying userId field...');
@@ -78,7 +78,7 @@ export class DealService {
         console.warn('No employee found for user ID:', createdBy);
         console.log('Using first available employee as fallback...');
         employee = await this.employeeModel.findOne().exec();
-        
+
         if (!employee) {
           throw new BadRequestException('No employees found in the system. Please create an employee first.');
         }
@@ -149,7 +149,7 @@ export class DealService {
       const createDeal = new this.dealModel(dealData);
       const savedDeal = await createDeal.save();
       console.log('Deal saved successfully:', savedDeal);
-      
+
       // ✅ Enrich with employee name for response
       return this.enrichDealWithEmployeeName(savedDeal.toObject());
     } catch (error) {
@@ -161,12 +161,12 @@ export class DealService {
   // ✅ UPDATED: Enrich all deals with employee names
   async findAll() {
     const deals = await this.dealModel.find().sort({ createdAt: -1 }).exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
@@ -176,12 +176,12 @@ export class DealService {
       .find({ assignedTo: salesExecutiveId })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
@@ -191,82 +191,82 @@ export class DealService {
       .find({ DealStatus: 'won' })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
   // Get won deals by sales executive
   async findWonDealsBySalesExecutive(salesExecutiveId: string) {
     const deals = await this.dealModel
-      .find({ 
+      .find({
         assignedTo: salesExecutiveId,
         DealStatus: 'won'
       })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
   // Get deals that haven't been converted to projects
   async findUnconvertedWonDeals() {
     const deals = await this.dealModel
-      .find({ 
+      .find({
         DealStatus: 'won',
         converted: false
       })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
   // Get pending deals (unconverted)
   async findPendingDeals() {
     const deals = await this.dealModel
-      .find({ 
+      .find({
         converted: false
       })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
   // Get converted deals
   async findConvertedDeals() {
     const deals = await this.dealModel
-      .find({ 
+      .find({
         converted: true
       })
       .sort({ createdAt: -1 })
       .exec();
-    
+
     // Enrich deals with employee names
     const enrichedDeals = await Promise.all(
       deals.map(deal => this.enrichDealWithEmployeeName(deal.toObject()))
     );
-    
+
     return enrichedDeals;
   }
 
@@ -276,7 +276,7 @@ export class DealService {
     if (!deal) {
       throw new NotFoundException('Deal not found');
     }
-    
+
     return this.enrichDealWithEmployeeName(deal.toObject());
   }
 
@@ -293,7 +293,7 @@ export class DealService {
     const updatedDeal = await this.dealModel
       .findByIdAndUpdate(id, updateDealDto, { new: true })
       .exec();
-    
+
     if (!updatedDeal) {
       throw new NotFoundException('Deal not found or could not be updated');
     }
@@ -303,7 +303,7 @@ export class DealService {
   // Mark deal as converted to project
   async markAsConverted(id: string, projectId: string, convertedBy: string) {
     const deal = await this.dealModel.findById(id).exec();
-    
+
     if (!deal) {
       throw new NotFoundException('Deal not found');
     }
@@ -332,7 +332,7 @@ export class DealService {
   // Update deal status (for drag-and-drop in pipeline)
   async updateStatus(id: string, newStatus: string, updatedBy: string) {
     let probability: number | undefined = undefined;
-    
+
     // Auto-set probability based on status
     if (newStatus === 'won') {
       probability = 100;
@@ -371,19 +371,19 @@ export class DealService {
   // Analytics endpoints
   async getDealStatistics(salesExecutiveId?: string) {
     const query = salesExecutiveId ? { assignedTo: salesExecutiveId } : {};
-    
+
     const [totalDeals, wonDeals, lostDeals, activeDeals] = await Promise.all([
       this.dealModel.countDocuments(query).exec(),
       this.dealModel.countDocuments({ ...query, DealStatus: 'won' }).exec(),
       this.dealModel.countDocuments({ ...query, DealStatus: 'lost' }).exec(),
-      this.dealModel.countDocuments({ 
-        ...query, 
-        DealStatus: { $nin: ['won', 'lost'] } 
+      this.dealModel.countDocuments({
+        ...query,
+        DealStatus: { $nin: ['won', 'lost'] }
       }).exec(),
     ]);
 
     const deals = await this.dealModel.find(query).exec();
-    
+
     const totalValue = deals.reduce((sum, deal) => sum + deal.dealAmount, 0);
     const wonValue = deals
       .filter(d => d.DealStatus === 'won')
@@ -392,8 +392,8 @@ export class DealService {
       .filter(d => d.DealStatus !== 'won' && d.DealStatus !== 'lost')
       .reduce((sum, deal) => sum + deal.dealAmount, 0);
 
-    const winRate = (wonDeals + lostDeals) > 0 
-      ? Math.round((wonDeals / (wonDeals + lostDeals)) * 100) 
+    const winRate = (wonDeals + lostDeals) > 0
+      ? Math.round((wonDeals / (wonDeals + lostDeals)) * 100)
       : 0;
 
     return {
