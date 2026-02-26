@@ -21,7 +21,7 @@ import { ProfileSettingsModule } from './profile-settings/profile-settings.modul
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { FacebookModule } from './facebook/facebook.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-
+import { WebsiteLeadsModule } from './website-leads/website-leads.module';
 
 import config from './config/config';
 
@@ -68,6 +68,7 @@ import config from './config/config';
     WebhooksModule,
     FacebookModule,
     CloudinaryModule,
+    WebsiteLeadsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
