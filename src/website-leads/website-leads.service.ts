@@ -31,7 +31,7 @@ export class WebsiteLeadsService {
                 source: 'website'
             };
 
-            console.log('🌐 Received Website Webhook Data mapped to:', mappedData);
+            console.log('🌐 Mapped Data for DB:', JSON.stringify(mappedData, null, 2));
 
             // Save to database (saves to 'websiteleads' collection per schema definition)
             const newLead = await this.websiteLeadModel.create(mappedData);
