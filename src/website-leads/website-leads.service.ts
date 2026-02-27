@@ -19,6 +19,8 @@ export class WebsiteLeadsService {
 
     async createWebhookLead(data: any) {
         try {
+            console.log('📬 RAW Webhook Data received:', JSON.stringify(data, null, 2));
+
             // Clean up keys matching Contact Form 7 or standard formats
             const mappedData = {
                 name: data['your-name'] || data.name || data.Name || data.firstName || 'Unknown',
@@ -46,13 +48,22 @@ export class WebsiteLeadsService {
 
     async createWebsiteLead(data: any) {
         try {
-            const newLead = await this.websiteLeadModel.create({
-                name: data.name,
-                email: data.email,
-                phone: data.phone,
-                elevatorType: data.elevatorType || data.passengerType,
+            console.log('📬 RAW Website API Data received:', JSON.stringify(data, null, 2));
+
+            if (!data) {
+                throw new HttpException('No data provided', HttpStatus.BAD_REQUEST);
+            }
+
+            // Make this as robust as the webhook handler
+            const mappedData = {
+                name: data.name || data['your-name'] || data.Name || 'Unknown',
+                email: data.email || data['your-email'] || data.Email || '',
+                phone: data.phone || data['tel-735'] || data.Phone || '',
+                elevatorType: data.elevatorType || data.passengerType || data['select-575'] || '',
                 source: 'website'
-            });
+            };
+
+            const newLead = await this.websiteLeadModel.create(mappedData);
 
             console.log('✅ Created Website Lead in websiteleads collection:', newLead._id);
 
@@ -62,7 +73,8 @@ export class WebsiteLeadsService {
             };
         } catch (error) {
             console.error('❌ Failed to create website lead:', error);
-            throw new HttpException('Failed to create lead', HttpStatus.INTERNAL_SERVER_ERROR);
+            if (error instanceof HttpException) throw error;
+            throw new HttpException(error.message || 'Failed to create lead', HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
