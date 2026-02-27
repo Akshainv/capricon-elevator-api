@@ -18,12 +18,14 @@ import { CreateLeadDto } from './dto/create-lead.dtos';
 import { UpdateLeadDto } from './dto/update-lead.dtos';
 import { CreateAssignLeadDto } from '../lead/dto/create-assign-lead.dto';
 import { JwtService } from '@nestjs/jwt';
+import { WebsiteLeadsService } from '../website-leads/website-leads.service';
 
 @Controller('lead')
 export class LeadController {
   constructor(
     private readonly leadService: LeadService,
-    private readonly jwtService: JwtService
+    private readonly jwtService: JwtService,
+    private readonly websiteLeadsService: WebsiteLeadsService
   ) { }
 
   // ====================== CREATE ======================
@@ -187,6 +189,46 @@ export class LeadController {
         error.message || 'Status update failed',
         HttpStatus.BAD_REQUEST,
       );
+    }
+  }
+
+  // ====================== WEBSITE LEAD ASSIGNMENT ======================
+  @Post('website-assign/:id')
+  async assignWebsiteLead(
+    @Param('id') id: string,
+    @Body('employeeId') employeeId: string,
+    @Req() req: Request
+  ) {
+    // Robust Identity Extraction
+    let adminId: string | undefined;
+    const reqUser = (req as any).user;
+    if (reqUser) {
+      adminId = reqUser.sub || reqUser.userId || reqUser._id || reqUser.id;
+    }
+
+    if (!adminId) {
+      const authHeader = req.headers['authorization'] || req.headers['Authorization'];
+      if (authHeader && authHeader.toString().startsWith('Bearer ')) {
+        try {
+          const token = authHeader.toString().split(' ')[1];
+          const payload = this.jwtService.decode(token) as any;
+          if (payload) {
+            adminId = payload.sub || payload.userId || payload._id || payload.id;
+          }
+        } catch (e) {
+          console.error('Failed to decode token in assignWebsiteLead:', e);
+        }
+      }
+    }
+
+    try {
+      const result = await this.websiteLeadsService.assignWebsiteLead(id, employeeId, adminId || '');
+      return {
+        statusCode: HttpStatus.OK,
+        ...result
+      };
+    } catch (error) {
+      throw new HttpException(error.message, error.status || HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

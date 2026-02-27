@@ -1,9 +1,14 @@
-import { Controller, Post, Get, Body, Headers, UnauthorizedException, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Headers, UnauthorizedException, HttpStatus, Param, Req } from '@nestjs/common';
 import { WebsiteLeadsService } from './website-leads.service';
+import { JwtService } from '@nestjs/jwt';
+import { Request } from 'express';
 
 @Controller('website-leads')
 export class WebsiteLeadsController {
-    constructor(private readonly websiteLeadsService: WebsiteLeadsService) { }
+    constructor(
+        private readonly websiteLeadsService: WebsiteLeadsService,
+        private readonly jwtService: JwtService
+    ) { }
 
     // 🌍 PUBLIC WEBHOOK ENDPOINT FOR WORDPRESS
     @Post('webhook')

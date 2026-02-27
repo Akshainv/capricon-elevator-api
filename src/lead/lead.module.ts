@@ -8,6 +8,7 @@ import { User, UserSchema } from '../auth/schemas/user.schema';
 import { Employee, EmployeeSchema } from '../employee/schemas/employeeSchema';
 
 import { NotificationsModule } from '../notifications/notifications.module';
+import { WebsiteLeadsModule } from '../website-leads/website-leads.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
       { name: Employee.name, schema: EmployeeSchema },
     ]),
     NotificationsModule,
+    WebsiteLeadsModule,
   ],
   controllers: [LeadController],
   providers: [LeadService],

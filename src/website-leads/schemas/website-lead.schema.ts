@@ -3,7 +3,7 @@ import { HydratedDocument } from 'mongoose';
 
 export type WebsiteLeadDocument = HydratedDocument<WebsiteLead>;
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, collection: 'websiteleads' })
 export class WebsiteLead {
     @Prop({ required: true })
     name: string;
