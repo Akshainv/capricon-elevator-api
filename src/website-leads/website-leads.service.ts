@@ -19,6 +19,11 @@ export class WebsiteLeadsService {
 
     async createWebhookLead(data: any) {
         try {
+            if (!data || Object.keys(data).length === 0) {
+                console.warn('⚠️ Received empty or undefined data in webhook');
+                throw new HttpException('No data received. Please ensure Content-Type is application/json', HttpStatus.BAD_REQUEST);
+            }
+
             console.log('📬 RAW Webhook Data received:', JSON.stringify(data, null, 2));
 
             // Clean up keys matching Contact Form 7 or standard formats
