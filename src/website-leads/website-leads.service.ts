@@ -28,54 +28,28 @@ export class WebsiteLeadsService {
                 phone: data['tel-735'] || data.phone || data.Phone || data.phoneNumber || '',
                 elevatorType: data['select-575'] || data.elevatorType || data.type || '',
                 message: data['your-message'] || data.message || data.Message || data.body || '',
-                source: 'Landing Page Form'
+                source: 'website'
             };
 
             console.log('🌐 Received Website Webhook Data mapped to:', mappedData);
 
-            // Save to database
+            // Save to database (saves to 'websiteleads' collection per schema definition)
             const newLead = await this.websiteLeadModel.create(mappedData);
 
             return {
                 message: 'Lead captured successfully',
+                data: newLead,
                 leadId: newLead._id
             };
         } catch (error) {
             console.error('❌ Failed to process website webhook:', error);
-            throw new HttpException('Failed to process lead', HttpStatus.INTERNAL_SERVER_ERROR);
+            throw new HttpException('Failed to process lead: ' + error.message, HttpStatus.INTERNAL_SERVER_ERROR);
         }
     }
 
     async createWebsiteLead(data: any) {
-        try {
-            console.log('📬 RAW Website API Data received:', JSON.stringify(data, null, 2));
-
-            if (!data) {
-                throw new HttpException('No data provided', HttpStatus.BAD_REQUEST);
-            }
-
-            // Make this as robust as the webhook handler
-            const mappedData = {
-                name: data.name || data['your-name'] || data.Name || 'Unknown',
-                email: data.email || data['your-email'] || data.Email || '',
-                phone: data.phone || data['tel-735'] || data.Phone || '',
-                elevatorType: data.elevatorType || data.passengerType || data['select-575'] || '',
-                source: 'website'
-            };
-
-            const newLead = await this.websiteLeadModel.create(mappedData);
-
-            console.log('✅ Created Website Lead in websiteleads collection:', newLead._id);
-
-            return {
-                message: 'Lead created successfully',
-                data: newLead
-            };
-        } catch (error) {
-            console.error('❌ Failed to create website lead:', error);
-            if (error instanceof HttpException) throw error;
-            throw new HttpException(error.message || 'Failed to create lead', HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+        // Delegate to createWebhookLead to ensure consistent mapping
+        return this.createWebhookLead(data);
     }
 
     async findAll() {

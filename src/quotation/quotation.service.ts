@@ -99,49 +99,83 @@ export class QuotationService {
     console.log('✅ Quotation created with ID:', createQuotation._id, 'createdBy:', createQuotation.createdBy);
     const enriched = await this.enrichQuotationWithCreator(createQuotation);
 
-    // ✅ Send Notifications to Admins (except the creator if they are an admin)
-    try {
-      const allAdmins = await this.userModel.find({ role: 'admin' }).exec();
+    // ✅ Send Notifications to Admins (Background process - non-blocking)
+    this.userModel.find({ role: 'admin' }).exec().then(async (allAdmins) => {
       const admins = allAdmins.filter(admin =>
         admin._id.toString() !== (createdBy ? createdBy.toString() : null)
       );
       const creatorName = enriched.createdBySalesName || 'A salesperson';
 
       for (const admin of admins) {
-        // 1. In-app Notification
-        await this.notificationsService.create({
-          icon: 'fa-file-invoice',
-          title: 'New Quotation Created',
-          message: `${creatorName} has created a new quotation ${quoteNumber} for ${createQuotationDto.customerName}.`,
-          time: new Date().toISOString(),
-          type: 'info',
-          isRead: false,
-          userId: admin._id.toString(),
-          actionLink: '/admin/admin-quotations'
-        });
+        try {
+          // 1. In-app Notification
+          await this.notificationsService.create({
+            icon: 'fa-file-invoice',
+            title: 'New Quotation Created',
+            message: `${creatorName} has created a new quotation ${quoteNumber} for ${createQuotationDto.customerName}.`,
+            time: new Date().toISOString(),
+            type: 'info',
+            isRead: false,
+            userId: admin._id.toString(),
+            actionLink: '/admin/admin-quotations'
+          });
 
-        // 2. Email Notification (Simple)
-        const fromAddress = process.env.EMAIL_USER || 'noreply@capricornelevators.com';
-        await this.transporter.sendMail({
-          from: `"Capricorn CRM" <${fromAddress}>`,
-          to: admin.email,
-          subject: `New Quotation Created: ${quoteNumber}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; padding: 20px;">
-              <h3>New Quotation Alert</h3>
-              <p><strong>Quotation Number:</strong> ${quoteNumber}</p>
-              <p><strong>Customer:</strong> ${createQuotationDto.customerName}</p>
-              <p><strong>Created By:</strong> ${creatorName}</p>
-              <p><strong>Total Value:</strong> INR ${createQuotationDto.totalCost?.toLocaleString('en-IN')}</p>
-              <br>
-              <p>Please log in to the admin dashboard to review.</p>
-            </div>
-          `
-        }).catch(err => console.error(`Failed to send email to admin ${admin.email}:`, err.message));
+          // 2. Email Notification (Professional)
+          const fromAddress = process.env.EMAIL_USER || 'noreply@capricornelevators.com';
+          await this.transporter.sendMail({
+            from: `"Capricorn CRM" <${fromAddress}>`,
+            to: admin.email,
+            subject: `New Quotation Alert: ${quoteNumber}`,
+            html: `
+              <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+                <div style="background-color: #1a1a1a; padding: 20px; text-align: center;">
+                  <h2 style="color: #d4b347; margin: 0; letter-spacing: 2px; text-transform: uppercase;">Capricorn Elevators</h2>
+                </div>
+                <div style="padding: 30px; color: #333;">
+                  <h3 style="color: #1a1a1a; border-bottom: 2px solid #d4b347; padding-bottom: 10px;">New Quotation Created</h3>
+                  <p>A new quotation has been generated in the system and is awaiting review.</p>
+                  
+                  <div style="background-color: #f9f9f9; padding: 20px; border-radius: 5px; margin: 20px 0;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                      <tr>
+                        <td style="padding: 8px 0; color: #666;"><strong>Quotation No:</strong></td>
+                        <td style="padding: 8px 0;">${quoteNumber}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666;"><strong>Customer:</strong></td>
+                        <td style="padding: 8px 0;">${createQuotationDto.customerName}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666;"><strong>Created By:</strong></td>
+                        <td style="padding: 8px 0;">${creatorName}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding: 8px 0; color: #666;"><strong>Total Value:</strong></td>
+                        <td style="padding: 8px 0; color: #d4b347; font-weight: bold;">INR ${createQuotationDto.totalCost?.toLocaleString('en-IN')}</td>
+                      </tr>
+                    </table>
+                  </div>
+                  
+                  <div style="text-align: center; margin-top: 30px;">
+                    <a href="${process.env.FRONTEND_URL || 'https://capricornelevators.com'}/admin/admin-quotations" 
+                       style="background-color: #d4b347; color: #1a1a1a; padding: 12px 25px; text-decoration: none; border-radius: 4px; font-weight: bold; display: inline-block;">
+                       Review Quotation
+                    </a>
+                  </div>
+                </div>
+                <div style="background-color: #f4f4f4; padding: 15px; text-align: center; font-size: 12px; color: #888;">
+                  © ${new Date().getFullYear()} Capricorn Elevators Pvt Ltd. All rights reserved.
+                </div>
+              </div>
+            `
+          });
+        } catch (err) {
+          console.error(`Failed to send notification to admin ${admin.email}:`, err.message);
+        }
       }
-    } catch (error) {
+    }).catch(error => {
       console.error('Failed to process admin notifications for quotation:', error);
-    }
+    });
 
     return enriched;
   }
@@ -324,22 +358,20 @@ export class QuotationService {
       .findByIdAndUpdate(id, { status }, { new: true })
       .exec();
 
-    // ✅ NOTIFY SALES EMPLOYEE when quotation is APPROVED
+    // ✅ NOTIFY SALES EMPLOYEE when quotation is APPROVED (Background process)
     if (status === 'approved' && quotation.createdBy) {
-      try {
-        await this.notificationsService.create({
-          icon: 'fa-check-circle',
-          title: 'Quotation Approved',
-          message: `Your quotation for ${quotation.customerName} has been approved by Admin.`,
-          time: new Date().toISOString(),
-          type: 'success',
-          isRead: false,
-          userId: quotation.createdBy,
-          actionLink: '/activities'
-        });
-      } catch (error) {
+      this.notificationsService.create({
+        icon: 'fa-check-circle',
+        title: 'Quotation Approved',
+        message: `Your quotation for ${quotation.customerName} has been approved by Admin.`,
+        time: new Date().toISOString(),
+        type: 'success',
+        isRead: false,
+        userId: quotation.createdBy,
+        actionLink: '/activities'
+      }).catch(error => {
         console.error('Failed to notify employee of quotation approval:', error);
-      }
+      });
     }
 
     return updatedQuotation;
@@ -999,14 +1031,43 @@ export class QuotationService {
   }
 
   private generateEmailBody(data: any): string {
+    const goldColor = '#d4b347';
+    const darkColor = '#1a1a1a';
+
     return `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #d4b347;">Capricorn Elevators</h2>
-        <p>Dear ${data.customer?.name || 'Customer'},</p>
-        <p>Please find attached the quotation <strong>${data.quoteNumber}</strong> as requested.</p>
-        <p><strong>Total Amount: INR ${(data.grandTotal || 0).toLocaleString('en-IN')}</strong></p>
-        <p>Best regards,<br>
-        <strong>Capricorn Elevators</strong></p>
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+        <div style="background-color: ${darkColor}; padding: 30px; text-align: center;">
+          <h1 style="color: ${goldColor}; margin: 0; letter-spacing: 3px; text-transform: uppercase; font-size: 24px;">Capricorn Elevators</h1>
+          <p style="color: #fff; margin-top: 5px; font-size: 12px; letter-spacing: 1px;">ELEVATING EXCELLENCE</p>
+        </div>
+        
+        <div style="padding: 40px; color: #333; line-height: 1.6;">
+          <h2 style="color: ${darkColor}; font-weight: 600; margin-top: 0;">Quotation for Your Project</h2>
+          <p>Dear ${data.customer?.name || 'Valued Customer'},</p>
+          <p>Thank you for choosing <strong>Capricorn Elevators</strong>. It is our pleasure to provide you with the project proposal and quotation for your elevator installation.</p>
+          
+          <div style="background-color: #f9f9f9; padding: 25px; border-left: 4px solid ${goldColor}; margin: 30px 0; border-radius: 0 5px 5px 0;">
+            <p style="margin: 0; font-size: 14px; color: #666;">Quotation Reference</p>
+            <h3 style="margin: 5px 0; color: ${darkColor};">${data.quoteNumber || 'Draft'}</h3>
+            <p style="margin: 15px 0 0 0; font-size: 14px; color: #666;">Total Project Value</p>
+            <h2 style="margin: 5px 0; color: ${goldColor}; font-size: 28px;">INR ${(data.grandTotal || data.totalCost || 0).toLocaleString('en-IN')}</h2>
+          </div>
+          
+          <p>Please find the detailed technical specifications and pricing breakdown in the attached PDF document.</p>
+          
+          <p>If you have any questions or require further customization, please do not hesitate to contact our sales team.</p>
+          
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee;">
+            <p style="margin-bottom: 5px;">Best regards,</p>
+            <p style="margin: 0; font-weight: bold; color: ${darkColor};">Sales Team</p>
+            <p style="margin: 0; color: ${goldColor}; font-weight: 600;">Capricorn Elevators Pvt Ltd</p>
+          </div>
+        </div>
+        
+        <div style="background-color: #f4f4f4; padding: 20px; text-align: center; font-size: 12px; color: #888;">
+          <p style="margin: 0;">This is an automated message. Please do not reply directly to this email.</p>
+          <p style="margin: 10px 0 0 0;">© ${new Date().getFullYear()} Capricorn Elevators Pvt Ltd. All rights reserved.</p>
+        </div>
       </div>`;
   }
 
