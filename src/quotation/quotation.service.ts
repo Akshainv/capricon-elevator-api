@@ -469,24 +469,28 @@ export class QuotationService {
         ],
       };
 
-      console.log(`📧 Attempting to send email via SMTP to ${recipientEmail}...`);
-      const info = await this.transporter.sendMail(mailOptions);
-      console.log(`✅ Email sent successfully! MessageID: ${info?.messageId}`);
+      // ✅ Send Email in background to prevent timeouts/slowness
+      const backgroundSend = async () => {
+        try {
+          console.log(`📧 [Background] Sending email to ${recipientEmail}...`);
+          const info = await this.transporter.sendMail(mailOptions);
+          console.log(`✅ [Background] Email sent successfully! MessageID: ${info?.messageId}`);
+          await this.updateStatus(id, 'sent');
+        } catch (bgError: any) {
+          console.error('❌ [Background] SMTP Error:', bgError.message);
+        }
+      };
 
-      await this.updateStatus(id, 'sent');
+      backgroundSend(); // Non-blocking
+
       return {
         message: 'Quotation sent successfully',
         quotation: q,
-        messageId: info?.messageId,
       };
     } catch (error: any) {
-      console.error('❌ SMTP Error details:', {
-        message: error.message,
-        code: error.code,
-        command: error.command
-      });
+      console.error('❌ PDF/Preparation Error:', error.message);
       throw new HttpException(
-        'Failed to send email: ' + error.message,
+        'Failed to prepare quotation: ' + error.message,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
